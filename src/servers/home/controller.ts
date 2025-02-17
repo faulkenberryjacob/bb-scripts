@@ -38,16 +38,13 @@
 //import * as utils from 'utils';
 import { Worker } from '@/lib/types';
 import { Logger } from '@/lib/logger';
-import { loadConfig } from '@/lib/defaults';
 import { formatTime } from '@/lib/formatter';
-import * as algo from '@/lib/hack-algorithm';
+import { maxHackAlgorithm, maxPrepAlgorithm } from '@/lib/hack-algorithm';
 
 export async function main(ns: NS) {
   const TARGET_HOSTNAME: string = ns.args[0].toString();
   const CURRENT_SERVER: string  = ns.getHostname();
-
-  const config = loadConfig(ns);
-  const PORT   = getRandomInt(100, 1000000);
+  const PORT   = getRandomInt(100, Number.MAX_SAFE_INTEGER);
 
   const logger = new Logger(ns);
   ns.disableLog("ALL");
@@ -91,7 +88,8 @@ export async function main(ns: NS) {
     let prepPids: Set<number> = new Set;
 
     // loop growing/weakening until we hit our desired threshold
-    const plan = await algo.maxPrepAlgorithm(ns, target, CURRENT_SERVER);
+    const availableRam = ns.getServerMaxRam(CURRENT_SERVER) - ns.getServerUsedRam(CURRENT_SERVER);
+    const { plan, growPct } = await maxPrepAlgorithm(ns, target, availableRam);
     if (plan.length == 0 ) {
       logger.log(`ERROR (${CURRENT_SERVER}) -- no PREP algorithm found for ${TARGET_HOSTNAME}, aborting`);
       return false;
@@ -159,8 +157,12 @@ export async function main(ns: NS) {
       counter++;
       if (counter >= 2400) {
         counter = 0;
-        let pidsString = "";
-        prepPids.forEach(p => pidsString = pidsString + p.toString());
+        const pidsString = Array.from(prepPids).join(', ');
+        const currentPids = ns.ps(CURRENT_SERVER).map(p => p.pid);
+        if (!currentPids.some(p => prepPids.has(p))) {
+          logger.log(`PIDS: ${pidsString} are no longer running!`);
+          break;
+        }
         logger.log(`Waiting on PIDS: ${pidsString}`);
       }
     }
@@ -182,7 +184,8 @@ export async function main(ns: NS) {
     let hackPids: Set<number> = new Set;
 
     // get the algorithm plan
-    const plan: algo.HackAlgorithm[] = await algo.maxHackAlgorithm(ns, TARGET_HOSTNAME, CURRENT_SERVER);
+    const availableRam = ns.getServerMaxRam(CURRENT_SERVER) - ns.getServerUsedRam(CURRENT_SERVER);
+    const { plan, hackPct } = await maxHackAlgorithm(ns, TARGET_HOSTNAME, availableRam);
     if (plan.length == 0) {
       logger.tlog(`ERROR (${CURRENT_SERVER}) -- no HACK algorithm found for ${TARGET_HOSTNAME}, returning to prep`);
       logger.log(`Security: ${ns.getServerSecurityLevel(target)} /  ${ns.getServerMinSecurityLevel(target)}`,1);
@@ -250,8 +253,12 @@ export async function main(ns: NS) {
     counter++;
     if (counter >= 2400) {
       counter = 0;
-      let pidsString = "";
-      hackPids.forEach(p => pidsString = pidsString + p.toString());
+      const pidsString = Array.from(hackPids).join(', ');
+      const currentPids = ns.ps(CURRENT_SERVER).map(p => p.pid);
+      if (!currentPids.some(p => hackPids.has(p))) {
+        logger.log(`PIDS: ${pidsString} are no longer running!`);
+        break;
+      }
       logger.log(`Waiting on PIDS: ${pidsString}`);
     }
   }

@@ -1,12 +1,13 @@
 import { Logger } from '@/lib/logger';
-import { loadConfig } from '@/lib/defaults';
 import { Server } from 'NetscriptDefinitions';
+import { buildServerDB, getServerData, readDB } from '@/lib/db';
+import { getOwnedServers } from './utils';
+import { canCrackFTP, canCrackHTTP, canCrackSMTP, canCrackSQL, canCrackSSH, getPurchasedServerNames } from '@/lib/defaults';
+import * as consts from '@/lib/constants';
+import { formatDollar } from '@/lib/formatter';
 
 export async function main(ns: NS) {
   ns.disableLog("ALL");
-
-  const config = loadConfig(ns);
-  const dbFile: string = config.serverDBFileName;
 
   const logger = new Logger(ns);
   const scriptName: string = ns.getScriptName();
@@ -15,25 +16,40 @@ export async function main(ns: NS) {
   let serverCheck: string[] = [];
 
   // if the DB doesn't exist, build it first
-  if (!ns.fileExists(dbFile)) {
-    buildServerDB(ns);
+  if (!ns.fileExists(consts.DB_FILE)) {
+    await buildServerDB(ns);
   } 
 
   // grab all the hostnames of our DB servers that we have admin rights on to populate our ongoing 'tracker' of servers
-  servers = (readDB(ns)).filter(server => server.hasAdminRights == true).map(server => server.hostname);
+  servers = (await readDB(ns)).filter(server => server.hasAdminRights == true).map(server => server.hostname);
+  const pollInterval = 1000 * 60 * 60; // 1 hour
+  let pollCounter = 0;
 
   try{
     while(true) {
-      ns.print("Rooting servers..");
+      if (pollCounter >= pollInterval) {
+        pollCounter = 0;
+        logger.tlog("Rerunning parasite auto..");
+        ns.exec(`parasite.js`, `home`, 1, `auto`);
+      }
+
+      // Recurse through and root all servers that we can, ignoring owned servers
+      logger.log("Rooting servers..");
       rootServers(ns);
 
-      ns.print("Building DB..");
-      buildServerDB(ns);
+      // Build the DB for cheap server data
+      logger.log("Building DB..");
+      await buildServerDB(ns);
+
+      // Check available funds for purchasing servers. Try to fill out the limit before upgrading servers
+      logger.log(`Upgrading servers..`)
+      await spinUpServers(ns);
 
       await ns.sleep(100);
+      pollCounter += 100;
 
       // check for any new rooted servers
-      serverCheck = (readDB(ns)).filter(server => server.hasAdminRights == true).map(server => server.hostname);
+      serverCheck = (await readDB(ns)).filter(server => server.hasAdminRights == true).map(server => server.hostname);
       const differences: string[] = serverCheck.filter(server => !servers.includes(server));
       for (const newServer of differences) {
         logger.tlog(`New server rooted: ${newServer}!`);
@@ -42,6 +58,7 @@ export async function main(ns: NS) {
     }
   } catch (error) {
     logger.tlog(`ERROR -- ${scriptName} DIED -- `);
+    logger.tlog(`Error: ${error}`);
   }
   logger.tlog(`ERROR -- ${scriptName} DIED --`)
 }
@@ -52,93 +69,17 @@ export async function main(ns: NS) {
 /* ------------------------------------------------------------------------------------------------------------------- */
 
 /**
- * Builds a server database by scanning all connected servers recursively and sorting them by maximum money.
- * @param {NS} ns - The NS object.
- * @returns {Promise<void>} - A promise that resolves when the server database is built.
- */
-function buildServerDB(ns: NS) {
-  ns.disableLog("disableLog");
-  ns.disableLog("write");
-  // Ongoing set of already-scanned servers
-  const scannedHostNames: Set<string> = new Set();
-  const scannedServers: Set<Server> = new Set();
-
-  // Load and create new server file
-  const serverDB: string = loadConfig(ns).serverDBFileName;
-  if (ns.fileExists(serverDB)) { ns.rm(serverDB); }
-
-  scanServer(ns.getServer());
-
-  const sortedServerArray = Array.from(scannedServers).sort((a, b) => (ns.getServerMaxMoney(b.hostname)) - (ns.getServerMaxMoney(a.hostname)));
-  const sortedServerMap: { [key: string]: Server } = sortedServerArray.reduce((acc, server) => {
-    acc[server.hostname] = server;
-    return acc;
-  }, {} as { [key: string]: Server });
-
-  const jsonString = JSON.stringify(sortedServerMap, null, 2);
-  ns.write(serverDB, jsonString, "w");
-
-  /**
-   * Recursively scans servers and performs operations on them
-   * @param {string} server - The current server to scan
-   */
-  function scanServer(server: Server) {
-    // If the server has already been scanned, skip it
-    if (scannedHostNames.has(server.hostname)) {
-      return;
-    }
-
-    // Mark the server as scanned
-    scannedHostNames.add(server.hostname);
-    scannedServers.add(server);
-
-    // Get connected servers
-    const connectedServers = ns.scan(server.hostname);
-
-    // Loop through each connected server
-    for (let i = 0; i < connectedServers.length; i++) {
-      const connectedServer: Server = ns.getServer(connectedServers[i]);
-
-      // Recursively scan the connected server
-      scanServer(connectedServer);
-    }
-  }
-}
-
-/**
- * Reads and parses the server database file into an array of sorted Server objects.
- * @param {NS} ns - The NS object.
- * @returns {Promise<Server[]>} - An array of Server objects.
- */
-function readDB(ns: NS) {
-
-  // Parse the JSON in the same format it was written to
-  const dbData: { [key: string]: Server } = JSON.parse(ns.read(loadConfig(ns).serverDBFileName));
-
-  // Create a server Array so we can keep the sorted integrity
-  const serverArray: Server[] = [];
-
-  for (const key in dbData) {
-    if (dbData.hasOwnProperty(key)) {
-      const server: Server = dbData[key];
-      serverArray.push(server);
-    }
-  }
-
-  return serverArray;
-}
-
-/**
  * Recursively scans and roots servers starting from a given server or the "home" server by default.
  * @param {NS} ns - The Netscript context.
  * @param {string} [startServer="home"] - The hostname to start the scan from. Defaults to "home".
  * @returns {Promise<string[]>} - A promise that resolves to a list of rooted server hostnames.
  */
-function rootServers(ns: NS, startServer: string = "home") {
+async function rootServers(ns: NS, startServer: string = "home") {
   // Ongoing set of already-scanned servers
-  const scannedServers = new Set();
   const logger = new Logger(ns);
+  const scannedServers = new Set();
   const rootedServers: string[] = [];
+  const ownedServers: string[] = getOwnedServers(ns);
 
   logger.log(`Rooting servers..`);
 
@@ -150,9 +91,9 @@ function rootServers(ns: NS, startServer: string = "home") {
    * Recursively scans servers and performs operations on them
    * @param {string} server - The current server to scan
    */
-  function scanServer(server: string) {
+  async function scanServer(server: string) {
     // If the server has already been scanned, skip it
-    if (scannedServers.has(server)) {
+    if (scannedServers.has(server) || ownedServers.includes(server)) {
       return;
     }
 
@@ -160,7 +101,7 @@ function rootServers(ns: NS, startServer: string = "home") {
 
     // Mark the server as scanned
     scannedServers.add(server);
-    const rootServerReturn = rootServer(ns, server);
+    const rootServerReturn = await rootServer(ns, server);
     if (rootServerReturn) {
       rootedServers.push(rootServerReturn);
     }
@@ -185,12 +126,9 @@ function rootServers(ns: NS, startServer: string = "home") {
  * @param {Server} server - The server to root.
  * @returns {Promise<string | undefined>} - Returns the server hostname if successfully rooted, otherwise undefined.
  */
-function rootServer(ns: NS, server: string) {
+async function rootServer(ns: NS, server: string) {
   const logger = new Logger(ns);
-  const config = loadConfig(ns);
-  const serverData: Server = getServerData(ns, server) as Server;
-
-  const CAN_BACKDOOR: boolean = Boolean(config.canBackdoor);
+  const serverData: Server = await getServerData(ns, server) as Server;
 
   logger.log("Checking server: " + server + "...", 1);
 
@@ -219,9 +157,8 @@ function rootServer(ns: NS, server: string) {
     isScriptable = true; 
   }
 
-  if (!serverData.backdoorInstalled && CAN_BACKDOOR) {
-    //ns.print("Installing backdoor..");
-    //await ns.singularity.installBackdoor();
+  if (!serverData.backdoorInstalled) {
+    // do backdoor stuff
   }
 
   if (!isScriptable) { return; }
@@ -273,32 +210,52 @@ function rootServer(ns: NS, server: string) {
 }
 
 /**
- * Retrieves data for a specified server from the database.
- * @param {NS} ns - The Netscript context.
- * @param {string} target - The hostname of the server to retrieve data for.
- * @returns {Promise<Server | undefined>} - A promise that resolves to the server data if found, otherwise undefined.
+ * Spins up servers by purchasing or upgrading them based on the player's available money.
+ * The function continues to purchase or upgrade servers until the player's money falls below a specified buffer.
+ *
+ * @param ns - The Netscript object providing access to game functions.
  */
-function getServerData(ns: NS, target: string) {
-  const db = readDB(ns);
-  return db.find(server => server.hostname === target);
-}
+async function spinUpServers(ns: NS) {
+  const logger = new Logger(ns);
+  let playerMoney: number = ns.getServerMoneyAvailable("home");
+  let canAfford: boolean = playerMoney > consts.MONEY_BUFFER;
+  let lowMoney: boolean = playerMoney < consts.MONEY_THRESHOLD;
 
-function canCrackSSH(ns: NS) {
-  return ns.fileExists("BruteSSH.exe", "home");
-}
+  const pServers = getPurchasedServerNames(ns);
+  let ramExponent: number = 1;
 
-function canCrackFTP(ns: NS) {
-  return ns.fileExists("FTPCrack.exe", "home");
-}
+  while (canAfford) {
+    const desiredRam = Math.pow(2, ramExponent);
+    const cost = ns.getPurchasedServerCost(desiredRam);
+    if (playerMoney < cost) { return; }
 
-function canCrackSMTP(ns: NS) {
-  return ns.fileExists("relaySMTP.exe", "home");
-}
+    for (let i = 0; i < pServers.length; i++) {
 
-function canCrackHTTP(ns: NS) {
-  return ns.fileExists("HTTPWorm.exe", "home");
-}
+      // if this server doesn't exist, purchase it
+      if (!ns.serverExists(pServers[i])) {
+        logger.tlog(`Purchasing server ${pServers[i]} with ${desiredRam}GB of RAM for ${formatDollar(cost)}`);
+        ns.purchaseServer(pServers[i], desiredRam);
+      } else {
+        // if it already exists but with less ram, upgrade it
+        if (ns.getServerMaxRam(pServers[i]) < desiredRam) {
+          try {
+            logger.tlog(`Upgrading server ${pServers[i]} to ${desiredRam}GB of RAM for ${formatDollar(cost)}`);
+            ns.upgradePurchasedServer(pServers[i], desiredRam);
+          } catch (error) {
+            logger.tlog(`Error upgrading server ${pServers[i]}: ${error}`);
+          }
+        }
+      }
 
-function canCrackSQL(ns: NS) {
-  return ns.fileExists("SQLInject.exe", "home");
+      // check if we've gone below our money threshold
+      playerMoney = ns.getServerMoneyAvailable("home");
+      canAfford = playerMoney > cost;
+      lowMoney = playerMoney < consts.MONEY_THRESHOLD;
+
+      if (!canAfford || lowMoney) { return; }
+    }
+
+    if (desiredRam >= ns.getPurchasedServerMaxRam()) { return; }
+    ramExponent++;
+  } 
 }

@@ -1,6 +1,7 @@
 import {formatDollar, formatTime} from '@/lib/formatter';
 import {Logger} from '@/lib/logger';
-import {loadConfig} from '@/lib/defaults';
+import {Plan} from '@/lib/types';
+import * as consts from '@/lib/constants';
 
 export async function main(ns: NS) {
   const arg = ns.args[0] ? ns.args[0].toString(): "";
@@ -29,12 +30,7 @@ export async function main(ns: NS) {
   }
 }
 
-export interface HackAlgorithm {
-  script: string,
-  threads: number,
-  args: string[],
-  runTime: number
-}
+
 
 /**
  * Prints the preparation algorithm for a target server, including the money available and security level.
@@ -46,12 +42,12 @@ export interface HackAlgorithm {
 export async function printPrepAlgorithm(ns: NS, targetServer: string, sourceServer: string) {
   const logger = new Logger(ns);
 
-  const algorithm = await maxPrepAlgorithm(ns, targetServer, sourceServer);
+  const { plan, growPct } = await maxPrepAlgorithm(ns, targetServer, ns.getServerMaxRam(sourceServer));
   const moneyAvailable = formatDollar(ns.getServerMoneyAvailable(targetServer));
   const currentSecurity = ns.getServerSecurityLevel(targetServer);
 
   logger.tlog(`${targetServer} has ${moneyAvailable} with security level ${currentSecurity}`);
-  for (const step of algorithm) {
+  for (const step of plan) {
     const finishTime = formatTime(step.runTime + Number(step.args[1]));
     logger.tlog(`\tWould run ${step.script} with ${step.threads} threads, finshing in ${finishTime}`);
   }
@@ -68,12 +64,12 @@ export async function printPrepAlgorithm(ns: NS, targetServer: string, sourceSer
 export async function printHackAlgorithm(ns: NS, targetServer: string, sourceServer: string) {
   const logger = new Logger(ns);
 
-  const algorithm = await maxHackAlgorithm(ns, targetServer, sourceServer);
+  const { plan, hackPct } = await maxHackAlgorithm(ns, targetServer, ns.getServerMaxRam(sourceServer));
   const moneyAvailable = formatDollar(ns.getServerMoneyAvailable(targetServer));
   const currentSecurity = ns.getServerSecurityLevel(targetServer);
 
   logger.tlog(`${targetServer} has ${moneyAvailable} with security level ${currentSecurity}`);
-  for (const step of algorithm) {
+  for (const step of plan) {
     const finishTime = formatTime(step.runTime + Number(step.args[1]));
     logger.tlog(`\tWould run ${step.script} with ${step.threads} threads, finshing in ${finishTime}`);
   }
@@ -81,62 +77,56 @@ export async function printHackAlgorithm(ns: NS, targetServer: string, sourceSer
 }
 
 export async function isHackPossible(ns: NS, targetServer: string, ram: number): Promise<boolean> {
-  const dummyServer: string = "home";
-  const plan = await maxHackAlgorithm(ns, targetServer, dummyServer, ram);
+  const { plan, hackPct } = await maxHackAlgorithm(ns, targetServer, ram);
   return plan.length > 0;
 }
 
 export async function isPrepPossible(ns: NS, targetServer: string, ram: number): Promise<boolean> {
-  const dummyServer: string = "home";
-  const plan = await maxPrepAlgorithm(ns, targetServer, dummyServer, ram);
+  const { plan, growPct } = await maxPrepAlgorithm(ns, targetServer, ram);
   return plan.length > 0;
 }
 
 /**
- * Calculates the maximum hack algorithm for a target server by determining the optimal number of threads for hack, grow, and weaken scripts.
- * @param {NS} ns - The Netscript context.
- * @param {string} targetServer - The hostname of the target server.
- * @param {string} sourceServer - The hostname of the source server.
- * @returns {Promise<HackAlgorithm[]>} - Returns an array of HackAlgorithm objects representing the ideal hack plan.
+ * Calculates the optimal hacking plan for a given target server, considering available RAM and other constraints.
+ * The plan includes hacking, growing, and weakening scripts to maximize the money obtained from the target server.
+ *
+ * @param {NS} ns - The Netscript environment.
+ * @param {string} targetServer - The name of the target server to hack.
+ * @param {number} availableRam - The amount of RAM available for running scripts.
+ * @param {number} [cores=1] - The number of CPU cores available for running scripts.
+ * @param {number} [ramBuffer=0] - The amount of RAM to reserve and not use for scripts.
+ * @returns {Promise<{plan: Plan[], hackPct?: number}>} - A promise that resolves to an object containing the plan and the hack percentage.
  */
-export async function maxHackAlgorithm(ns: NS, targetServer: string, sourceServer: string, freeRam?: number) {
+export async function maxHackAlgorithm(ns: NS, targetServer: string, availableRam: number, cores: number = 1, ramBuffer: number = 0): Promise<{plan: Plan[], hackPct?: number}> {
   /*
                         |= hack ====================|
-      |=weaken 1======================================|
+      |=weaken 1=====================================|
                     |= grow ==========================|
-        |=weaken 2======================================|
+        |=weaken 2=====================================|
   
                   We want to accomplish the above
   */
 
-  const config = loadConfig(ns);
   const logger = new Logger(ns);
   const db = 
 
   logger.log(`Starting max hack algorithm`);
 
-  if (!ns.serverExists(targetServer) || !ns.serverExists(sourceServer)) {
-    logger.log(`One of these servers don't exist! ${targetServer}, ${sourceServer}`, 1);
-    return [];
+  if (!ns.serverExists(targetServer)) {
+    logger.log(`${targetServer} isn't a valid server!`, 1);
+    return { plan: [], hackPct: 0 };
   }
 
-  const HACK_SCRIPT: string     = config.hackScriptName;
-  const GROW_SCRIPT: string     = config.growScriptName;
-  const WEAKEN_SCRIPT: string   = config.weakenScriptName;
-
-  const resultArray: HackAlgorithm[] = [];
+  const resultArray: Plan[] = [];
 
   // get some resource info
   const maxMoney = ns.getServerMaxMoney(targetServer);
   const currentMoney = ns.getServerMoneyAvailable(targetServer);
-  const ramBuffer: number = sourceServer == "home" ? Number(config.homeRamBuffer) : 0;
-  const serverRam = freeRam ? freeRam : ns.getServerMaxRam(sourceServer) - ns.getServerUsedRam(sourceServer) - ramBuffer;
-  const cores: number = ns.getServer().cpuCores;
+  const serverRam = availableRam - ramBuffer;
 
-
-  const hackRam = ns.getScriptRam(HACK_SCRIPT);
-  const growRam = ns.getScriptRam(GROW_SCRIPT);
-  const weakenRam = ns.getScriptRam(WEAKEN_SCRIPT);
+  const hackRam = ns.getScriptRam(consts.HACK_SCRIPT);
+  const growRam = ns.getScriptRam(consts.GROW_SCRIPT);
+  const weakenRam = ns.getScriptRam(consts.WEAK_SCRIPT);
   
   // Start at 100%
   const startHackPercent = 1.0;
@@ -146,13 +136,20 @@ export async function maxHackAlgorithm(ns: NS, targetServer: string, sourceServe
 
   return await findMaxHackPercentageForAlgorithm(startHackPercent);
 
-  async function findMaxHackPercentageForAlgorithm(hackPercent: number) {
+  /**
+   * Finds the maximum hack percentage for an algorithm by calculating the required threads for hacking, growing, and weakening,
+   * and ensuring the total RAM usage does not exceed the available server RAM.
+   *
+   * @param {number} hackPercent - The initial hack percentage to start the calculation.
+   * @returns {Promise<{plan: Plan[], hackPct?: number}>} - A promise that resolves to an object containing the plan and the hack percentage.
+   *
+   */
+  async function findMaxHackPercentageForAlgorithm(hackPercent: number): Promise<{plan: Plan[], hackPct?: number}> {
     hackPercent = parseFloat(hackPercent.toFixed(2));
 
     if (hackPercent <= 0) {
       logger.log(`hackPercent hit ${hackPercent}, no solutions found`)
-      const error: HackAlgorithm[] = []
-      return error;
+      return { plan: [], hackPct: 0 };
     }
 
     // Calculate hack threads
@@ -160,8 +157,8 @@ export async function maxHackAlgorithm(ns: NS, targetServer: string, sourceServe
     const hackThreads = Math.floor(ns.hackAnalyzeThreads(targetServer, hackAmount));
     if (hackThreads <= -1) {
       logger.log(`hackAnalyzeThreads returned ${hackThreads} for hackAmount ${hackAmount} with hackPercent ${hackPercent}.`);
-      const error: HackAlgorithm[] = []
-      return error;
+      const error: Plan[] = [];
+      return { plan: [], hackPct: 0 };
     }
 
     // Calculate security increase from hacking
@@ -192,7 +189,7 @@ export async function maxHackAlgorithm(ns: NS, targetServer: string, sourceServe
     if (totalRamUsed > serverRam ) { return await findMaxHackPercentageForAlgorithm(hackPercent-decayRate); }
     else if (totalRamUsed < 0) { 
       logger.tlog(`ERROR -- totalRamUsed hit (${totalRamUsed}), aborting..`);
-      return [];
+      return { plan: [], hackPct: 0 };
     }
     
     // if this succeeds let's store the results and sort them by
@@ -218,29 +215,29 @@ export async function maxHackAlgorithm(ns: NS, targetServer: string, sourceServe
       for (let a = 0; a < parallelLoops; a++) {
         const iterationDelay = a * parallelDelay;
 
-        const hackInterface: HackAlgorithm = {
-          script: HACK_SCRIPT,
+        const hackInterface: Plan = {
+          script: consts.HACK_SCRIPT,
           threads: hackThreads,
           args: [targetServer, (hackDelay + iterationDelay).toString()],
           runTime: hackTime
         };
 
-        const weakenHackInterface: HackAlgorithm = {
-          script: WEAKEN_SCRIPT,
+        const weakenHackInterface: Plan = {
+          script: consts.WEAK_SCRIPT,
           threads: weakenThreadsForHack,
           args: [targetServer, (weakenHackDelay + iterationDelay).toString()],
           runTime: weakenTime
         };
 
-        const growInterface: HackAlgorithm = {
-          script: GROW_SCRIPT,
+        const growInterface: Plan = {
+          script: consts.GROW_SCRIPT,
           threads: growThreads,
           args: [targetServer, (growDelay + iterationDelay).toString()],
           runTime: growTime
         };
 
-        const weakenGrowInterface: HackAlgorithm = {
-          script: WEAKEN_SCRIPT,
+        const weakenGrowInterface: Plan = {
+          script: consts.WEAK_SCRIPT,
           threads: weakenThreadsForGrow,
           args: [targetServer, (weakenGrowDelay + iterationDelay).toString()],
           runTime: weakenTime
@@ -258,40 +255,38 @@ export async function maxHackAlgorithm(ns: NS, targetServer: string, sourceServe
       //   logger.log(`${resultArray[p].script} (${resultArray[p].threads}) with runTime: ${formatTime(resultArray[p].runTime)} and args ${resultArray[p].args.join(', ')}`);
       // }
 
-      return resultArray;
+      return { plan: resultArray, hackPct: hackPercent};
     }
 
   }
 }
 
 /**
- * Calculates the maximum preparation algorithm for a target server by determining the optimal number of threads for grow and weaken scripts.
- * @param {NS} ns - The Netscript context.
- * @param {string} targetServer - The hostname of the target server.
- * @param {string} sourceServer - The hostname of the source server.
- * @returns {Promise<HackAlgorithm[]>} - Returns an array of HackAlgorithm objects representing the ideal preparation plan.
+ * Calculates the optimal preparation plan for a given target server, considering available RAM and other constraints.
+ * The plan includes growing and weakening scripts to maximize the money obtained from the target server and minimize its security level.
+ *
+ * @param {NS} ns - The Netscript environment.
+ * @param {string} targetServer - The name of the target server to prepare.
+ * @param {number} availableRam - The amount of RAM available for running scripts.
+ * @param {number} [cores=1] - The number of CPU cores available for running scripts.
+ * @param {number} [ramBuffer=0] - The amount of RAM to reserve and not use for scripts.
+ * @returns {Promise<{plan: Plan[], growPct?: number}>} - A promise that resolves to an object containing the plan and the grow percentage.
  */
-export async function maxPrepAlgorithm(ns: NS, targetServer: string, sourceServer: string, freeRam?: number) {
+export async function maxPrepAlgorithm(ns: NS, targetServer: string, availableRam: number, cores: number = 1, ramBuffer: number = 0): Promise<{plan: Plan[], growPct?: number}> {
   const logger = new Logger(ns);
-  const config = loadConfig(ns);
 
   logger.log(`Starting prep algorithm`);
 
-  const GROW_SCRIPT: string     = config.growScriptName;
-  const WEAKEN_SCRIPT: string   = config.weakenScriptName;
-
-  const resultArray: HackAlgorithm[] = [];
+  const resultArray: Plan[] = [];
 
   // get some resource info
   const maxMoney  = ns.getServerMaxMoney(targetServer);
-  const ramBuffer: number = sourceServer == "home" ? Number(config.homeRamBuffer) : 0;
-  const serverRam = freeRam ? freeRam : ns.getServerMaxRam(sourceServer) - ns.getServerUsedRam(sourceServer) - ramBuffer;
+  const serverRam = availableRam - ramBuffer;
   const minSecurityLevel     = ns.getServerMinSecurityLevel(targetServer);
   const currentSecurityLevel = ns.getServerSecurityLevel(targetServer);
-  const cores: number = ns.getServer(sourceServer).cpuCores;
 
-  const growRam   = ns.getScriptRam(GROW_SCRIPT);
-  const weakenRam = ns.getScriptRam(WEAKEN_SCRIPT);
+  const growRam   = ns.getScriptRam(consts.GROW_SCRIPT);
+  const weakenRam = ns.getScriptRam(consts.WEAK_SCRIPT);
 
   // assume we can prep the server in one script run
   const growPercentage: number = 1.00;
@@ -300,48 +295,57 @@ export async function maxPrepAlgorithm(ns: NS, targetServer: string, sourceServe
 
   return await findQuickestPrepAlgorithm(growPercentage);
 
-  async function findQuickestPrepAlgorithm(growDecay: number, weakenDecay: number = 1.00) {
-    growDecay   = parseFloat(growDecay.toFixed(2));
-    weakenDecay = parseFloat(weakenDecay.toFixed(2));
+  /**
+   * Finds the quickest preparation algorithm to grow and weaken a server.
+   * 
+   * @param {number} growPercent - The percentage of growth to achieve.
+   * @param {number} [weakenPercent=1.00] - The percentage of weakening to achieve.
+   * @returns {Promise<{plan: Plan[], growPct?: number}>} - A promise that resolves to an object containing the plan and the grow percentage.
+   * 
+   * @throws Will throw an error if the total RAM used is less than or equal to 0.
+   */
+  async function findQuickestPrepAlgorithm(growPercent: number, weakenPercent: number = 1.00): Promise<{plan: Plan[], growPct?: number}> {
+    growPercent   = parseFloat(growPercent.toFixed(2));
+    weakenPercent = parseFloat(weakenPercent.toFixed(2));
 
-    // if (growDecay <= 0.0500 && weakenDecay <= 0.0500) {
-    //   logger.log(`ERROR -- growDecay (${growDecay}), weakenDecay (${weakenDecay}) too low. No prep solution found.`);
+    // if (growPercent <= 0.0500 && weakenPercent <= 0.0500) {
+    //   logger.log(`ERROR -- growPercent (${growPercent}), weakenPercent (${weakenPercent}) too low. No prep solution found.`);
     //   return [];
     // }
     
     // Calculate the number of threads needed to grow the server to max money
-    const growThreads = Math.ceil(growDecay * ns.growthAnalyze(targetServer, maxMoney / Math.max(ns.getServerMoneyAvailable(targetServer), 1), cores));
+    const growThreads = Math.ceil(growPercent * ns.growthAnalyze(targetServer, maxMoney / Math.max(ns.getServerMoneyAvailable(targetServer), 1), cores));
 
     // Calculate the security increase from growing
     const growSecurityIncrease = ns.growthAnalyzeSecurity(growThreads, undefined, cores);
 
     // Calculate the number of threads needed to weaken the server to min security
     const totalSecurityIncrease = growSecurityIncrease + (currentSecurityLevel - minSecurityLevel);
-    const weakenThreads = Math.ceil(weakenDecay * (totalSecurityIncrease / ns.weakenAnalyze(1, cores)));
+    const weakenThreads = Math.ceil(weakenPercent * (totalSecurityIncrease / ns.weakenAnalyze(1, cores)));
 
     // Ensure there is enough RAM to run the scripts
     const totalRamUsed = (growThreads * growRam) + (weakenThreads * weakenRam);
-    logger.log(`Prep algorithm: growDecay ${growDecay} gives ${growThreads} threads, weakenDecay ${weakenDecay} gives ${weakenThreads} threads = ${totalRamUsed} RAM`, 1);
+    logger.log(`Prep algorithm: growPercent ${growPercent} gives ${growThreads} threads, weakenPercent ${weakenPercent} gives ${weakenThreads} threads = ${totalRamUsed} RAM`, 1);
 
     // if there's a failure somewhere, exit
     if (totalRamUsed <= 0) {
       logger.tlog(`ERROR -- totalRamUsed returned ${totalRamUsed}`);
-      return [];
+      return {plan: [], growPct: 0};
 
     // if we're using too much RAM and our decays haven't hit rock bottom, recurse
-    } else if (totalRamUsed > serverRam && (growDecay > decayRate || weakenDecay > decayRate)) { 
+    } else if (totalRamUsed > serverRam && (growPercent > decayRate || weakenPercent > decayRate)) { 
       // these decay numbers are our failsafes. If it's impossible to grow & weaken with full potential,
       // we slowly wittle down how many grow threads are possible. Once we hit 5% (0.05) of potential
       // grow threads, we start decaying weaken until our worst possible outcomes: 5% of both's potential
-      const newGrowDecay    = Math.max(growDecay-decayRate, decayRate);
-      const newWeakenDecay  = Math.max(weakenDecay-decayRate, decayRate);
+      const newgrowPercent    = Math.max(growPercent-decayRate, decayRate);
+      const newweakenPercent  = Math.max(weakenPercent-decayRate, decayRate);
 
-      return await findQuickestPrepAlgorithm(newGrowDecay, newWeakenDecay);
+      return await findQuickestPrepAlgorithm(newgrowPercent, newweakenPercent);
 
     // if we hit rock bottom, exit
-    } else if (growDecay <= decayRate && weakenDecay <= decayRate) {
+    } else if (growPercent <= decayRate && weakenPercent <= decayRate) {
       logger.log(`ERROR - Could not find any prep plans`);
-      return [];
+      return { plan: [], growPct: 0 };
     }
     
     // if this succeeds let's store the results
@@ -360,24 +364,24 @@ export async function maxPrepAlgorithm(ns: NS, targetServer: string, sourceServe
       //     ex: if each loops takes  20 GB, and we have 100 GB
       //     available, let's do 5 loops
       // (2) Only do as much as necessary to grow to max money.
-      //     ex: If our growDecay is 0.25, or in otherwards we can
+      //     ex: If our growPercent is 0.25, or in otherwards we can
       //     grow 25% of our money back per loop, let's only do
       //     4 loops assuming we have the RAM for it. Otherwise do (1).
-      const mostGrow = Math.ceil(1 / growDecay);
+      const mostGrow = Math.ceil(1 / growPercent);
       const mostGrowRam = mostGrow * totalRamUsed;
       const parallelLoops = mostGrowRam < serverRam ? mostGrow : Math.floor(serverRam/totalRamUsed);
       for (let a = 0; a < parallelLoops; a++) {
         const parallelDelay: number = 500 // in milliseconds
 
-        const growInterface: HackAlgorithm = {
-          script: GROW_SCRIPT,
+        const growInterface: Plan = {
+          script: consts.GROW_SCRIPT,
           threads: growThreads,
           args: [targetServer, (growDelay + (a * parallelDelay)).toString()],
           runTime: ns.getGrowTime(targetServer),
         };
 
-        const weakenInterface: HackAlgorithm = {
-          script: WEAKEN_SCRIPT,
+        const weakenInterface: Plan = {
+          script: consts.WEAK_SCRIPT,
           threads: weakenThreads,
           args: [targetServer, (weakenDelay + (a * parallelDelay)).toString()],
           runTime: ns.getWeakenTime(targetServer),
@@ -388,13 +392,13 @@ export async function maxPrepAlgorithm(ns: NS, targetServer: string, sourceServe
       }
 
 
-      logger.log(`Ideal plan determined with ${growDecay.toString()}, ${weakenDecay.toString()} decays using ${totalRamUsed} RAM`);
+      logger.log(`Ideal plan determined with ${growPercent.toString()}, ${weakenPercent.toString()} decays using ${totalRamUsed} RAM`);
       // for (let p = 0; p < resultArray.length; p++) {
       //   logger.log(resultArray[p].script + "(" + resultArray[p].threads + ")" + " with runTime: " + formatTime(resultArray[p].runTime) 
       //   + " ms and args: " + resultArray[p].args + " ms");
       // }
 
-      return resultArray;
+      return {plan: resultArray, growPct: growPercent};
     }
 
   }

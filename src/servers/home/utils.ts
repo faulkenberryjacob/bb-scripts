@@ -1,11 +1,12 @@
 import { formatDollar, formatTime } from '@/lib/formatter';
 import { Logger } from '@/lib/logger';
-import { canCrackFTP, canCrackHTTP, canCrackSMTP, canCrackSQL, canCrackSSH, loadConfig } from '@/lib/defaults';
-import { buildServerDB, readDB } from '@/lib/db';
+import { canCrackFTP, canCrackHTTP, canCrackSMTP, canCrackSQL, canCrackSSH } from '@/lib/defaults';
+import { buildServerDB, getServerData, readDB } from '@/lib/db';
 import { Server } from 'NetscriptDefinitions';
-import { calculateMaxThreadsForScript, getTopServerByMoneyPerSecond } from '@/lib/calc';
+import { calculateMaxThreadsForScript, determinePurchaseServerMaxRam, getTopServerByMoneyPerSecond } from '@/lib/calc';
+import * as consts from '@/lib/constants';
+import { printHackAlgorithm, printPrepAlgorithm } from '@/lib/hack-algorithm';
 
-const CONFIG_FILE: string = 'config.json';
 const SCRIPT_NAME: string = 'utils.ts';
 
 export async function main(ns: NS) {
@@ -42,6 +43,20 @@ export async function main(ns: NS) {
       ns.tprint("Killing all scripts on servers");
       killAll(ns);
       break;
+    case "dryrun":
+      if (ns.args[1] && ns.args[2]) {
+        const target: string = ns.args[1].toString();
+        const host: string = ns.args[2].toString();
+
+        ns.tprint(`Prep algorithm for ${target} on ${host}`);
+        await printPrepAlgorithm(ns, target, host);
+
+        ns.tprint(`Hack algorithm for ${target} on ${host}`);
+        await printHackAlgorithm(ns, target, host);
+      } else {
+        ns.tprint(`Usage: utils.js dryrun [target] [host]`);
+      }
+      break;
     default:
       ns.tprint(`
         utils.js [function] [...args]
@@ -59,6 +74,8 @@ export async function main(ns: NS) {
         top                         Print the top servers (in terms of money per second) in desc order
 
         killAll                     Kills all scripts on known servers
+
+        dryRun [target] [host]      Prints out the prep and hack algorithms for [target] on [host]
         `);
       break;
   }
@@ -66,17 +83,6 @@ export async function main(ns: NS) {
 
 export function getUtilsName() {
   return SCRIPT_NAME;
-}
-
-/**
- * Retrieves data for a specified server from the database.
- * @param {NS} ns - The Netscript context.
- * @param {string} target - The hostname of the server to retrieve data for.
- * @returns {Promise<Server | undefined>} - A promise that resolves to the server data if found, otherwise undefined.
- */
-export async function getServerData(ns: NS, target: string) {
-  const db = await readDB(ns);
-  return db.find(server => server.hostname === target);
 }
 
 /**
@@ -94,14 +100,13 @@ export async function printServerData(ns: NS, target: string) {
   else { logger.tlog("Server not found."); }
 }
 
-
-
-
-
-
-
-export function killAll(ns: NS) {
-  const db = readDB(ns);
+/**
+ * Terminates all running scripts on all servers except the home server.
+ *
+ * @param ns - The Netscript object provided by Bitburner.
+ */
+export async function killAll(ns: NS) {
+  const db = await readDB(ns);
 
   for (const ownedServer of ns.getPurchasedServers()) {
     db.push(ns.getServer(ownedServer));
@@ -112,12 +117,18 @@ export function killAll(ns: NS) {
   }
 }
 
-
-
-
-
+/**
+ * Displays the top servers based on money earned per second.
+ *
+ * This function retrieves the top servers by money per second and prints
+ * detailed information about each server, including maximum money, hack time,
+ * grow time, weaken time, cycle time, hack chance, and calculated money per second.
+ *
+ * @param ns - The Netscript object providing access to game functions.
+ * @returns A promise that resolves when the function completes.
+ */
 export async function showTopServers(ns: NS) {
-  const topServers = getTopServerByMoneyPerSecond(ns);
+  const topServers = await getTopServerByMoneyPerSecond(ns);
   for (let i = 0; i < topServers.length; i++) {
     const maxMoney = ns.getServerMaxMoney(topServers[i]);
     const hackTime = ns.getHackTime(topServers[i]);
@@ -132,6 +143,18 @@ export async function showTopServers(ns: NS) {
 }
 
 
+/**
+ * Removes specified files from a given server.
+ *
+ * @param ns - The Netscript environment.
+ * @param files - An array of filenames to be removed from the server.
+ * @param server - The name of the server from which to remove the files.
+ * @returns A promise that resolves to a boolean indicating whether all specified files were successfully deleted.
+ *
+ * @remarks
+ * If the server is "home", the function will log a message and abort without deleting any files.
+ * The function logs the deletion process and any failures encountered.
+ */
 export async function removeFilesFromServer(ns: NS, files: string[], server: string) {
   const logger = new Logger(ns);
   if (server == "home") {
@@ -236,46 +259,6 @@ export async function killScripts(ns: NS, scripts: string[], targetServer: strin
   return !await checkIfScriptsAlreadyRunning(ns, scripts, targetServer);
 }
 
-interface ScriptInstance {
-  name: string,
-  threads: number,
-  args: string[]
-}
-
-/**
- * Deploys and executes specified scripts on the target server after killing any currently running instances.
- * @param {NS} ns - The NS object.
- * @param {ScriptInstance[]} scripts - An array of script instances, each containing a script name, number of threads, and arguments.
- * @param {string} targetServer - The target server on which to deploy the scripts.
- * @param {string} sourceServer - The source server from which to copy the scripts.
- * @returns {Promise<boolean>} - True if all specified scripts are executed successfully, false otherwise.
- */
-export async function deployScripts(ns: NS, scripts: ScriptInstance[], targetServer: string, sourceServer: string) {
-  const logger = new Logger(ns);
-  
-  // kill anything already running
-  const scriptArray: string[] = scripts.map(instance => instance.name);
-  if (!await killScripts(ns, scriptArray, targetServer)) {
-    logger.log("Unable to kill still-running scripts. Aborting.");
-    return false;
-  }
-
-  // copy over scripts
-  ns.scp(scriptArray, targetServer, sourceServer);
-
-  let anyScriptsFailed = false;
-
-  scripts.forEach(instance => {
-    const pid = ns.exec(instance.name, targetServer, instance.threads, ...instance.args);
-    if (pid === 0) {
-      anyScriptsFailed = true;
-      logger.log(`Failed to execute script ${instance.name} on server: ${targetServer}`);
-    }
-  })
-
-  return !anyScriptsFailed;
-}
-
 /**
  * Deploys and executes a specified script on the target server after killing any currently running instance.
  * @param {NS} ns - The NS object.
@@ -363,6 +346,12 @@ export async function deployScriptNoOptimization(ns: NS, script: string, targetS
   return pid != 0;
 }
 
+/**
+ * Retrieves a list of all owned servers, including the home server.
+ *
+ * @param ns - The Netscript environment object.
+ * @returns An array of strings representing the names of all owned servers.
+ */
 export function getOwnedServers(ns: NS): string[] {
   const purchasedServers = ns.getPurchasedServers();
   purchasedServers.push("home");
@@ -429,10 +418,7 @@ export async function rootServers(ns: NS, startServer: string = "home") {
  */
 export async function rootServer(ns: NS, server: string) {
   const logger = new Logger(ns);
-  const config = await loadConfig(ns);
   const serverData: Server = await getServerData(ns, server) as Server;
-
-  const CAN_BACKDOOR: boolean = Boolean(config.canBackdoor);
 
   logger.log("Checking server: " + server + "...", 1);
 
@@ -461,7 +447,7 @@ export async function rootServer(ns: NS, server: string) {
     isScriptable = true; 
   }
 
-  if (!serverData.backdoorInstalled && CAN_BACKDOOR) {
+  if (!serverData.backdoorInstalled) {
     //ns.print("Installing backdoor..");
     //await ns.singularity.installBackdoor();
   }
@@ -515,44 +501,16 @@ export async function rootServer(ns: NS, server: string) {
 }
 
 
-
-
-
 /**
- * Determines the maximum RAM that can be afforded for purchasing servers.
- * @param {NS} ns - The Netscript context.
- * @returns {number} - The maximum RAM that can be afforded for the servers.
+ * Asynchronously retrieves the paths of all servers in the network and writes them to a file.
+ * 
+ * This function scans all servers starting from the home server, records their paths in a file,
+ * and returns a list of rooted servers. It avoids scanning the same server multiple times by 
+ * keeping track of already-scanned servers.
+ * 
+ * @param {NS} ns - The Netscript object providing access to game functions.
+ * @returns {Promise<string[]>} - A promise that resolves to an array of rooted server hostnames.
  */
-export function determinePurchaseServerMaxRam(ns: NS, numServers?: number) {
-  const logger              = new Logger(ns);
-  const numToBuy: number    = numServers ? numServers : ns.getPurchasedServerLimit();
-  const playerMoney: number = ns.getServerMoneyAvailable("home");
-
-  // we can only buy server RAM in powers of 2, or 2^n
-  const starterRamExponent: number = 1;
-
-  return recurseRamCost(starterRamExponent);
-
-  function recurseRamCost(ramExponent: number) {
-    const ram = Math.pow(2, ramExponent);
-    logger.log(`Checking cost for ${numToBuy} servers with ${ram} RAM..`)
-
-    const cost = ns.getPurchasedServerCost(ram);
-    const totalCost = cost * numToBuy;
-
-    logger.log(`Costs ${formatDollar(totalCost)}`),1
-
-    if (totalCost <= playerMoney) {
-      logger.log(`Can afford ${ram}!`,1);
-      return recurseRamCost(ramExponent + 1);
-    } else {
-      const maxRam = Math.pow(2, ramExponent-1);
-      logger.log(`Found max: ${maxRam}`);
-      return maxRam;
-    }
-  }
-}
-
 export async function getServerPaths(ns: NS) {
   // Ongoing set of already-scanned servers
   const scannedServers = new Set();
@@ -633,14 +591,4 @@ export async function waitForScriptsToFinish(ns: NS, pids: number[], delay: numb
     await ns.sleep(delay); // Check every half second
   }
   //logger.log(`Done waiting for pids: ${pids.join(', ')}`);
-}
-
-
-
-
-export interface Process {
-  pid: number,
-  name: string,
-  args: string[],
-  threads: number
 }

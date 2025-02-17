@@ -4,10 +4,11 @@ export type Worker = {
     value: number
 }
 
-export type GameState =
-  | "early"
-  | "mid"
-  | "end";
+export enum GameState { 
+  Early = 0,
+  Mid = 1,
+  End = 2
+}
 
 export type Controller = {
   name: string,
@@ -39,3 +40,10 @@ export type AdjacentNodes = {
     south: string | undefined,
     west: string  | undefined
 };
+
+export type Plan = {
+  script: string,
+  threads: number,
+  args: string[],
+  runTime: number
+}

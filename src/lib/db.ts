@@ -1,7 +1,8 @@
 import { Server } from "NetscriptDefinitions";
-import { getPortsCanCrack, loadConfig } from "./defaults";
+import { getPortsCanCrack } from "./defaults";
 import { Logger } from "./logger";
 import { formatDollar } from "./formatter";
+import * as consts from "./constants";
 
 
 /**
@@ -17,17 +18,11 @@ export async function buildServerDB(ns: NS) {
     const scannedServers: Set<Server> = new Set();
   
     // Load and create new server file
-    const serverDB: string = loadConfig(ns).serverDBFileName;
-    if (ns.fileExists(serverDB)) { ns.rm(serverDB); }
+    if (ns.fileExists(consts.DB_FILE)) { ns.rm(consts.DB_FILE); }
   
     await scanServer(ns.getServer());
   
-    // remove all our owned servers from the list
-    // const ownedServers = ns.getPurchasedServers();
-    // ownedServers.push("home");
-    // const nonOwnedServerArray = Array.from(scannedServers).filter(server => !ownedServers.includes(server.hostname));
-  
-    // sort
+    // sort the servers by max money
     const sortedServerArray = Array.from(scannedServers).sort((a, b) => (ns.getServerMaxMoney(b.hostname)) - (ns.getServerMaxMoney(a.hostname)));
     const sortedServerMap: { [key: string]: Server } = sortedServerArray.reduce((acc, server) => {
       acc[server.hostname] = server;
@@ -35,7 +30,7 @@ export async function buildServerDB(ns: NS) {
     }, {} as { [key: string]: Server });
   
     const jsonString = JSON.stringify(sortedServerMap, null, 2);
-    ns.write(serverDB, jsonString, "w");
+    ns.write(consts.DB_FILE, jsonString, "w");
   
     /**
      * Recursively scans servers and performs operations on them
@@ -70,10 +65,10 @@ export async function buildServerDB(ns: NS) {
  * @param {NS} ns - The NS object.
  * @returns {Promise<Server[]>} - An array of Server objects.
  */
-export function readDB(ns: NS) {
+export async function readDB(ns: NS) {
 
   // Parse the JSON in the same format it was written to
-  const dbData: { [key: string]: Server } = JSON.parse(ns.read(loadConfig(ns).serverDBFileName));
+  const dbData: { [key: string]: Server } = JSON.parse(ns.read(consts.DB_FILE));
 
   // Create a server Array so we can keep the sorted integrity
   const serverArray: Server[] = [];
@@ -89,12 +84,25 @@ export function readDB(ns: NS) {
 }
 
 /**
- * Retrieves a list of hackable servers based on the player's hacking level and admin rights.
+ * Retrieves data for a specified server from the database.
  * @param {NS} ns - The Netscript context.
- * @returns {Promise<string[]>} - A promise that resolves to a list of hackable server hostnames.
+ * @param {string} target - The hostname of the server to retrieve data for.
+ * @returns {Promise<Server | undefined>} - A promise that resolves to the server data if found, otherwise undefined.
  */
-export function getHackableServers(ns: NS) {
-  const db = readDB(ns);
+export async function getServerData(ns: NS, target: string) {
+  const db = await readDB(ns);
+  return db.find(server => server.hostname === target);
+}
+
+/**
+ * Retrieves a list of hackable servers based on the player's current hacking level,
+ * admin rights, and excluding the home server and owned servers.
+ *
+ * @param ns - The Netscript object providing access to game functions and data.
+ * @returns An array of server hostnames that are hackable.
+ */
+export async function getHackableServers(ns: NS) {
+  const db = await readDB(ns);
 
   let hackableServers: string[] = [];
   const hackingLevel: number = ns.getHackingLevel();

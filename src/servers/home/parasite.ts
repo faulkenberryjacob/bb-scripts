@@ -1,27 +1,12 @@
-import { loadConfig, getConfigName } from '@/lib/defaults';
 import { formatDollar } from '@/lib/formatter'
 import { Logger } from '@/lib/logger';
-import { deleteAllFilesOnServer, getServerData, getUtilsName, rootServer, rootServers } from './utils';
-import { buildServerDB, getHackableServers, getTopServerWithMaxMoney } from '@/lib/db';
-import { calculateMaxThreadsForScript, getTopServerByMoneyPerSecond } from '@/lib/calc';
+import { deleteAllFilesOnServer, getUtilsName, rootServer, rootServers } from './utils';
+import { buildServerDB, getHackableServers, getTopServerWithMaxMoney, getServerData } from '@/lib/db';
+import { calculateMaxThreadsForScript, determinePurchaseServerMaxRam, getTopServerByMoneyPerSecond } from '@/lib/calc';
+import * as consts from '@/lib/constants';
 
 /** @param {NS} ns */
 export async function main(ns: NS) {
-  // Loading up defaults
-  const config = await loadConfig(ns);
-
-  const HACK_ALGO_SCRIPT: string    = config.hackAlgorithmScriptName;
-  const CONTROLLER_SCRIPT: string   = config.controllerScriptName;
-  const WEAKEN_SCRIPT: string       = config.weakenScriptName;
-  const HACK_SCRIPT: string         = config.hackScriptName;
-  const GROW_SCRIPT: string         = config.growScriptName;
-  const STARTER_HACK_SCRIPT: string = config.starterHackScriptName;
-  const SHARE_SCRIPT: string        = config.shareLoopScriptName;
-
-  const DEFAULT_PURCHASE_RAM: number  = Number(config.defaultServerPurchaseRam);
-
-  const PURCHASED_SERVER_NAME: string = config.defaultServerPurchaseName;
-
   const CURRENT_SERVER = ns.getServer();
 
   const logger = new Logger(ns);
@@ -45,11 +30,11 @@ export async function main(ns: NS) {
       break;
     case "share":
       // share all other server space
-      await parasiteStarter(SHARE_SCRIPT);
+      await parasiteStarter(consts.SHARE_SCRIPT);
       break;
     case "starter":
       // do basic hacking command
-      await parasiteStarter(STARTER_HACK_SCRIPT);
+      await parasiteStarter(consts.STARTER_HACK_SCRIPT);
       break;
     case "auto":
       // automatically target top N servers
@@ -90,7 +75,7 @@ export async function main(ns: NS) {
     await buildServerDB(ns);
 
     // get top servers by top money hacked per second * hackChance
-    const topServers = getTopServerByMoneyPerSecond(ns);
+    const topServers = await getTopServerByMoneyPerSecond(ns);
 
     logger.tlog(`Targeting top servers (${topServers.length}): ${topServers.join(', ')}`);
 
@@ -101,8 +86,8 @@ export async function main(ns: NS) {
       logger.tlog("We have enough servers! (" + ns.getPurchasedServers().length.toString() + ")", 1);
     }
 
-    const filesToCopy: string[]    = [CONTROLLER_SCRIPT, WEAKEN_SCRIPT, GROW_SCRIPT, 
-                                      HACK_SCRIPT, HACK_ALGO_SCRIPT, getConfigName(), getUtilsName()];
+    const filesToCopy: string[]    = [consts.CONTROLLER_SCRIPT, consts.WEAK_SCRIPT, consts.GROW_SCRIPT, 
+                                      consts.HACK_SCRIPT, consts.HACK_ALGO_SCRIPT, getUtilsName()];
     const argsForController: string[] = [];
 
     // assume this is trying to fill up ALL purchased servers
@@ -169,8 +154,8 @@ export async function main(ns: NS) {
     }
     logger.tlog(host + " is scriptable!", 1);
 
-    if (ns.exec(CONTROLLER_SCRIPT, "home", 1, host) == 0) {
-        logger.tlog("ERROR -- Could not start " + CONTROLLER_SCRIPT + " on home", 3);
+    if (ns.exec(consts.CONTROLLER_SCRIPT, "home", 1, host) == 0) {
+        logger.tlog("ERROR -- Could not start " + consts.CONTROLLER_SCRIPT + " on home", 3);
         return 2;
     }
 
@@ -220,8 +205,8 @@ export async function main(ns: NS) {
     }
 
     const targetArray: string[]    = [target.hostname];
-    const filesToCopy: string[]    = [CONTROLLER_SCRIPT, WEAKEN_SCRIPT, GROW_SCRIPT, 
-                                      HACK_SCRIPT, HACK_ALGO_SCRIPT, await getConfigName(), await getUtilsName()];
+    const filesToCopy: string[]    = [consts.CONTROLLER_SCRIPT, consts.WEAK_SCRIPT, consts.GROW_SCRIPT, 
+                                      consts.HACK_SCRIPT, consts.HACK_ALGO_SCRIPT, await getUtilsName()];
     const argsForController: string[] = [];
 
     // assume this is trying to fill up ALL purchased servers
@@ -247,12 +232,13 @@ export async function main(ns: NS) {
     let purchasedServers = ns.getPurchasedServers().sort();
     const serverLimit = ns.getPurchasedServerLimit();
     const serverCeiling = serverAmount <= serverLimit ? serverAmount : serverLimit;
+    const requestedRam: number = determinePurchaseServerMaxRam(ns, serverCeiling);
 
     const generatedServerNames: string[] = [];
 
     for (let i = 0; i < serverCeiling; i++) {
       const paddedNumber = String(i).padStart(2, '0');
-      const newServerName = `${PURCHASED_SERVER_NAME}-${paddedNumber}`;
+      const newServerName = `${consts.SERVER_PURCHASE_NAME}-${paddedNumber}`;
       generatedServerNames.push(newServerName);
     }
 
@@ -261,7 +247,7 @@ export async function main(ns: NS) {
     logger.tlog("Checking servers..", 1);
 
     for (let a = 0; a < serverCeiling; a++) {
-      requestServer(generatedServerNames[a], DEFAULT_PURCHASE_RAM);
+      requestServer(generatedServerNames[a], requestedRam);
     }
 
     return ns.getPurchasedServers().length >= serverAmount;
@@ -297,8 +283,8 @@ export async function main(ns: NS) {
       ns.killall(purchasedServers[b]);
       //await removeFilesFromServer(ns, filesToCopy, purchasedServers[b]);
       ns.scp(filesToCopy, purchasedServers[b], CURRENT_SERVER.hostname);
-      if (ns.exec(CONTROLLER_SCRIPT, purchasedServers[b], 1, targets[distribute]) == 0) {
-        logger.tlog("ERROR -- Could not start " + CONTROLLER_SCRIPT + " on " + purchasedServers[b], 3);
+      if (ns.exec(consts.CONTROLLER_SCRIPT, purchasedServers[b], 1, targets[distribute]) == 0) {
+        logger.tlog("ERROR -- Could not start " + consts.CONTROLLER_SCRIPT + " on " + purchasedServers[b], 3);
         failedFactories.add(purchasedServers[b]);
       }
       logger.tlog(`Controller on ${purchasedServers[b]} has been started targeting ${targets[distribute]}`);

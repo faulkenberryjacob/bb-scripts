@@ -14,6 +14,7 @@ const createContext = async () => await context({
     BitburnerPlugin({
       port: 12525,
       types: 'NetscriptDefinitions.d.ts',
+      remoteDebugging: true,
       mirror: {
       },
       distribute: {

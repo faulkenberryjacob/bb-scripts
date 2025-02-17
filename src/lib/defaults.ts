@@ -1,17 +1,16 @@
-const CONFIG_FILE: string = 'config.json';
+import * as consts from "./constants";
 
-/**
- * Loads the configuration data from the specified configuration file.
- * @param {NS} ns - The NS object.
- * @returns {object} - The parsed configuration data.
- */
-export function loadConfig(ns: NS) {
-    return JSON.parse(ns.read(CONFIG_FILE));
+export function getPurchasedServerNames(ns: NS) {
+  // generate a list of purchased server names
+  const generatedServerNames: string[] = [];
+
+  for (let i = 0; i < ns.getPurchasedServerLimit(); i++) {
+    const paddedNumber = String(i).padStart(2, '0');
+    const newServerName = `${consts.SERVER_PURCHASE_NAME}-${paddedNumber}`;
+    generatedServerNames.push(newServerName);
   }
 
-  
-export function getConfigName() {
-return CONFIG_FILE;
+  return generatedServerNames;
 }
 
 export function canCrackSSH(ns: NS) {
