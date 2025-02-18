@@ -74,9 +74,6 @@ export async function main(ns: NS) {
     } else {
       await hackServer(TARGET_HOSTNAME);
     }
-
-    logger.log(`Security: ${ns.getServerSecurityLevel(TARGET_HOSTNAME)} /  ${ns.getServerMinSecurityLevel(TARGET_HOSTNAME)}`);
-    logger.log(`Money: ${ns.formatNumber(ns.getServerMoneyAvailable(TARGET_HOSTNAME))} / ${ns.formatNumber(ns.getServerMaxMoney(TARGET_HOSTNAME))}`);
   }
 
   /**
@@ -145,10 +142,13 @@ export async function main(ns: NS) {
           // remove that process from our set
           prepPids.delete(data.pid);
         }
-      }
+      }    
 
-      // when our set is empty, all our processes finished.
-      if (prepPids.size == 0) {
+      const currentPids = ns.ps(CURRENT_SERVER).map(p => p.pid);
+  
+      // check if set of pids are empty OR, in case of some issue, grab current pids
+      // and manually check if they're not running
+      if (prepPids.size == 0 || !currentPids.some(p => prepPids.has(p))) {
         scriptsRunning = false;
       }
       await ns.sleep(25);
@@ -158,11 +158,6 @@ export async function main(ns: NS) {
       if (counter >= 2400) {
         counter = 0;
         const pidsString = Array.from(prepPids).join(', ');
-        const currentPids = ns.ps(CURRENT_SERVER).map(p => p.pid);
-        if (!currentPids.some(p => prepPids.has(p))) {
-          logger.log(`PIDS: ${pidsString} are no longer running!`);
-          break;
-        }
         logger.log(`Waiting on PIDS: ${pidsString}`);
       }
     }
@@ -211,57 +206,55 @@ export async function main(ns: NS) {
       }       
     }
 
-  // watch our PORT for any reporting workers. when they report, aggregate their
-  // data and remove them from the pid set. Once the pid set is empty, we know
-  // all our workers are done
-  logger.log(`Watching port ${PORT} and waiting for workers to finish..`);
-  let scriptsRunning = true;
-  let counter: number = 0;
-  while (scriptsRunning) {
-    if (await handler.peek() != `NULL PORT DATA`) {
-      // we have data! parse the JSON and assume it's one of our worker types
-      const data: Worker = JSON.parse(await handler.read());
-      if (hackPids.has(data.pid)) {
-        logger.log(`Worker ${data.script} (${data.pid}) reported!`,1)
-        switch (data.script) {
-          case `hack.ts`:
-            logger.log(`HACK stole ${ns.formatNumber(data.value)}`,2);
-            break;
-          case `grow.ts`:
-            logger.log(`GROW ${ns.formatNumber(data.value)}, putting money at ${ns.getServerMoneyAvailable(TARGET_HOSTNAME)} / ${maxMoney}`,2)
-            break;
-          case `weaken.ts`:
-            logger.log(`WEAKEN ${data.value}, putting security at ${ns.getServerSecurityLevel(TARGET_HOSTNAME)} / ${minSecurity}`,2);
-            break;
-          default:
-            logger.log(`UNKNOWN data: ${data.pid}, ${data.script}, ${data.value}`,2);
-            break;
+    // watch our PORT for any reporting workers. when they report, aggregate their
+    // data and remove them from the pid set. Once the pid set is empty, we know
+    // all our workers are done
+    logger.log(`Watching port ${PORT} and waiting for workers to finish..`);
+    let scriptsRunning = true;
+    let counter: number = 0;
+    while (scriptsRunning) {
+      if (await handler.peek() != `NULL PORT DATA`) {
+        // we have data! parse the JSON and assume it's one of our worker types
+        const data: Worker = JSON.parse(await handler.read());
+        if (hackPids.has(data.pid)) {
+          logger.log(`Worker ${data.script} (${data.pid}) reported!`,1)
+          switch (data.script) {
+            case `hack.ts`:
+              logger.log(`HACK stole ${ns.formatNumber(data.value)}`,2);
+              break;
+            case `grow.ts`:
+              logger.log(`GROW ${ns.formatNumber(data.value)}, putting money at ${ns.getServerMoneyAvailable(TARGET_HOSTNAME)} / ${maxMoney}`,2)
+              break;
+            case `weaken.ts`:
+              logger.log(`WEAKEN ${data.value}, putting security at ${ns.getServerSecurityLevel(TARGET_HOSTNAME)} / ${minSecurity}`,2);
+              break;
+            default:
+              logger.log(`UNKNOWN data: ${data.pid}, ${data.script}, ${data.value}`,2);
+              break;
+          }
+
+          // remove that process from our set
+          hackPids.delete(data.pid);
         }
-
-        // remove that process from our set
-        hackPids.delete(data.pid);
       }
-    }
-
-    // when our set is empty, all our processes finished.
-    if (hackPids.size == 0) {
-      scriptsRunning = false;
-    }
-    await ns.sleep(25);
-
-    // wait 1 minute to report pending PIDs
-    counter++;
-    if (counter >= 2400) {
-      counter = 0;
-      const pidsString = Array.from(hackPids).join(', ');
+      
       const currentPids = ns.ps(CURRENT_SERVER).map(p => p.pid);
-      if (!currentPids.some(p => hackPids.has(p))) {
-        logger.log(`PIDS: ${pidsString} are no longer running!`);
-        break;
+
+      // check if set of pids are empty OR, in case of some issue, grab current pids
+      // and manually check if they're not running
+      if (hackPids.size == 0 || !currentPids.some(p => hackPids.has(p))) {
+        scriptsRunning = false;
       }
-      logger.log(`Waiting on PIDS: ${pidsString}`);
+      await ns.sleep(25);
+
+      // wait 1 minute to report pending PIDs
+      counter += 25;
+      if (counter >= (1000 * 60)) {
+        counter = 0;
+        const pidsString = Array.from(hackPids).join(', ');
+        logger.log(`Waiting on PIDS: ${pidsString}`);
+      }
     }
-  }
 
     const usedRamPercent = ((ns.getServerUsedRam(CURRENT_SERVER) / ns.getServerMaxRam(CURRENT_SERVER))*100);
     logger.log(`Done waiting! Server is using ${usedRamPercent}% RAM`, 1);

@@ -36,7 +36,7 @@ export async function main(ns: NS) {
       await getServerPaths(ns);
       break;
     case "top":
-      ns.tprint(`Showing top 25 servers:`);
+      ns.tprint(`Showing top ${ns.getPurchasedServerLimit()} servers:`);
       await showTopServers(ns);
       break;
     case "killall":
@@ -129,7 +129,8 @@ export async function killAll(ns: NS) {
  */
 export async function showTopServers(ns: NS) {
   const topServers = await getTopServerByMoneyPerSecond(ns);
-  for (let i = 0; i < topServers.length; i++) {
+  const purchasedServerLimit = ns.getPurchasedServerLimit();
+  for (let i = 0; i < purchasedServerLimit; i++) {
     const maxMoney = ns.getServerMaxMoney(topServers[i]);
     const hackTime = ns.getHackTime(topServers[i]);
     const growTime = ns.getGrowTime(topServers[i]);
@@ -138,7 +139,7 @@ export async function showTopServers(ns: NS) {
     const moneyPerSecond = parseFloat((maxMoney / (cycleTime/1000)).toFixed(2));
     const hackChance = parseFloat((ns.hackAnalyzeChance(topServers[i])*100).toFixed(2));
     const calcMoneyPerSecond = ns.hackAnalyzeChance(topServers[i]) * moneyPerSecond;
-    ns.tprint(`${topServers[i]} has ${formatDollar(maxMoney)} max money with ${hackChance}% hack chance. Cycle time is ${formatTime(cycleTime)}. Will earn ${formatDollar(calcMoneyPerSecond)} per second.`);
+    ns.tprint(`${i+1}: ${topServers[i]} has ${formatDollar(ns, maxMoney)} max money with ${hackChance}% hack chance. Cycle time is ${formatTime(cycleTime)}. Will earn ${formatDollar(ns, calcMoneyPerSecond)} per second.`);
   }
 }
 
@@ -352,7 +353,7 @@ export async function deployScriptNoOptimization(ns: NS, script: string, targetS
  * @param ns - The Netscript environment object.
  * @returns An array of strings representing the names of all owned servers.
  */
-export function getOwnedServers(ns: NS): string[] {
+export async function getOwnedServers(ns: NS): Promise<string[]> {
   const purchasedServers = ns.getPurchasedServers();
   purchasedServers.push("home");
   return purchasedServers;

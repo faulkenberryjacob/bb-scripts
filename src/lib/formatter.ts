@@ -22,16 +22,8 @@ export function formatTime(timeInMillis: number) {
  * @param {number} money - The amount of money to format.
  * @returns {Promise<string>} - The formatted dollar amount.
  */
-export function formatDollar(money: number) {
-  // Create a NumberFormat object for US dollars
-  const formatter = new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 0,
-  });
-
-  // Format the number
-  return formatter.format(money);
+export function formatDollar(ns: NS, money: number) {
+  return `$${ns.formatNumber(money)}`;
 }
 
 /**

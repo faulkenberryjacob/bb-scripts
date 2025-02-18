@@ -30,7 +30,7 @@ export async function main(ns: NS) {
       break;
     case "share":
       // share all other server space
-      await parasiteStarter(consts.SHARE_SCRIPT);
+      await parasiteStarter(consts.SHARE_LOOP_SCRIPT);
       break;
     case "starter":
       // do basic hacking command
@@ -168,7 +168,12 @@ export async function main(ns: NS) {
    * @returns {Promise<number>} - Returns the result of parasiteHome or parasiteTarget function.
    */
   async function parasiteMoney(onHome: boolean = false) {
-    const bigMoneyTarget: string = await getTopServerWithMaxMoney(ns);
+    const topServers: string[] = await getTopServerByMoneyPerSecond(ns);
+    const bigMoneyTarget: string = topServers.length > 0 ? topServers[0] : "";
+    if (!bigMoneyTarget || bigMoneyTarget == "") {
+      logger.tlog("No servers found!", 1);
+      return 2;
+    }
     if (onHome) {
       return await parasiteHome(bigMoneyTarget);
     } else {
@@ -279,9 +284,8 @@ export async function main(ns: NS) {
       logger.log("to: " + purchasedServers[b], 2);
       const distribute: number = b % targets.length;
 
-      // kill all scripts, remove all files, then SCP over
+      // kill all scripts then SCP over
       ns.killall(purchasedServers[b]);
-      //await removeFilesFromServer(ns, filesToCopy, purchasedServers[b]);
       ns.scp(filesToCopy, purchasedServers[b], CURRENT_SERVER.hostname);
       if (ns.exec(consts.CONTROLLER_SCRIPT, purchasedServers[b], 1, targets[distribute]) == 0) {
         logger.tlog("ERROR -- Could not start " + consts.CONTROLLER_SCRIPT + " on " + purchasedServers[b], 3);
@@ -312,7 +316,7 @@ export async function main(ns: NS) {
     const currentMoney: number = ns.getServerMoneyAvailable("home");
     const purchaseCost: number = ns.getPurchasedServerCost(ram);
     if (currentMoney < purchaseCost) {
-      logger.tlog(`Cannot afford ${name}. Cost: ${formatDollar(purchaseCost)}`, 2);
+      logger.tlog(`Cannot afford ${name}. Cost: ${formatDollar(ns, purchaseCost)}`, 2);
       return false;
     }
 

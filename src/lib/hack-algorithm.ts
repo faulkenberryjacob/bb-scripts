@@ -43,7 +43,7 @@ export async function printPrepAlgorithm(ns: NS, targetServer: string, sourceSer
   const logger = new Logger(ns);
 
   const { plan, growPct } = await maxPrepAlgorithm(ns, targetServer, ns.getServerMaxRam(sourceServer));
-  const moneyAvailable = formatDollar(ns.getServerMoneyAvailable(targetServer));
+  const moneyAvailable = formatDollar(ns, ns.getServerMoneyAvailable(targetServer));
   const currentSecurity = ns.getServerSecurityLevel(targetServer);
 
   logger.tlog(`${targetServer} has ${moneyAvailable} with security level ${currentSecurity}`);
@@ -65,7 +65,7 @@ export async function printHackAlgorithm(ns: NS, targetServer: string, sourceSer
   const logger = new Logger(ns);
 
   const { plan, hackPct } = await maxHackAlgorithm(ns, targetServer, ns.getServerMaxRam(sourceServer));
-  const moneyAvailable = formatDollar(ns.getServerMoneyAvailable(targetServer));
+  const moneyAvailable = formatDollar(ns, ns.getServerMoneyAvailable(targetServer));
   const currentSecurity = ns.getServerSecurityLevel(targetServer);
 
   logger.tlog(`${targetServer} has ${moneyAvailable} with security level ${currentSecurity}`);
@@ -211,7 +211,7 @@ export async function maxHackAlgorithm(ns: NS, targetServer: string, availableRa
       // for example, if we have 1,000 GB available but this loop only takes 250 GB,
       // we can run it four times back to back.
       const parallelLoops = Math.floor(serverRam/totalRamUsed);
-      const parallelDelay: number = 25 // in milliseconds
+      const parallelDelay: number = 40 // in milliseconds
       for (let a = 0; a < parallelLoops; a++) {
         const iterationDelay = a * parallelDelay;
 
@@ -356,7 +356,7 @@ export async function maxPrepAlgorithm(ns: NS, targetServer: string, availableRa
 
       const longestRunTime  = Math.max(weakenTime, growTime);
 
-      const weakenDelay = longestRunTime - weakenTime + 200;
+      const weakenDelay = longestRunTime - weakenTime + 25;
       const growDelay   = longestRunTime - growTime;
 
       // We can either
@@ -371,7 +371,7 @@ export async function maxPrepAlgorithm(ns: NS, targetServer: string, availableRa
       const mostGrowRam = mostGrow * totalRamUsed;
       const parallelLoops = mostGrowRam < serverRam ? mostGrow : Math.floor(serverRam/totalRamUsed);
       for (let a = 0; a < parallelLoops; a++) {
-        const parallelDelay: number = 500 // in milliseconds
+        const parallelDelay: number = 50 // in milliseconds
 
         const growInterface: Plan = {
           script: consts.GROW_SCRIPT,

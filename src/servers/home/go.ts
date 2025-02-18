@@ -19,19 +19,18 @@
 
 */
 
-import { Move, GoOpponent, BoardSize, AdjacentNodes } from 'lib/types';
-import { RunningScript } from '../../NetscriptDefinitions';
+import { Move, GoOpponent, BoardSize, AdjacentNodes } from '@/lib/types';
+import { RunningScript } from 'NetscriptDefinitions';
 
 const DEAD: string = "#";
-
-
 
 export async function main(ns: NS) {
   let wins = 0;
   let losses = 0;
+  debugger;
 
   // Check arguments
-  if (!ns.args) {
+  if (ns.args.length < 2) {
     ns.tprint(`ERROR - pass in args! run go.ts [opponent] [boardSize]`);
     return;
   }
@@ -81,7 +80,13 @@ export async function main(ns: NS) {
     const server = ns.getHostname();
 
     ns.tprint(`Killing duplicate [${currentScript.filename}] script..`);
-    ns.kill(currentScript.filename, server, ...currentScript.args);
+    const runningProcesses = ns.ps(ns.getHostname());
+    for (const process of runningProcesses) {
+      if (process.filename === currentScript.filename && process.pid !== currentScript.pid) {
+        ns.tprint(`Killing ${process.filename} with pid ${process.pid}`, 1);
+        ns.kill(process.filename, server, process.pid);
+      }
+    }
   }
 
 
@@ -190,7 +195,8 @@ export async function main(ns: NS) {
   }
 
   async function determineBestMove(): Promise<void> {
-    //
+    const [x, y] = await move_PlaceRandomNode();
+    await ns.go.makeMove(x, y);
 
   }
 
@@ -246,7 +252,7 @@ export async function main(ns: NS) {
     
   }
 
-  async function move_NetExpansion(): Promise<[number, number] | undefined> {
+  async function move_NetExpansion() {
     const board: string[]         = ns.go.getBoardState();
     const size: number            = board[0].length;
     const validMoves: boolean[][] = await getValidMoves();
@@ -279,7 +285,7 @@ export async function main(ns: NS) {
 
   }
 
-  async function move_CaptureNetwork(): Promise<[number, number] | undefined> {
+  async function move_CaptureNetwork() {
     const board: string[]         = ns.go.getBoardState();
     const size: number            = board[0].length;
     const validMoves: boolean[][] = await getValidMoves();

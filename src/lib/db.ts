@@ -137,7 +137,7 @@ export async function getTopServerWithMaxMoney(ns: NS) {
   for (let i = 0; i < db.length; i++) {
     const serverMoney = ns.getServerMaxMoney(db[i].hostname);
     const requiredLevel = ns.getServerRequiredHackingLevel(db[i].hostname);
-    logger.log(`Checking ${db[i].hostname} with ${formatDollar(serverMoney)} and required hacking ${requiredLevel}...`);
+    logger.log(`Checking ${db[i].hostname} with ${formatDollar(ns, serverMoney)} and required hacking ${requiredLevel}...`);
 
     if (serverMoney > (ns.getServerMaxMoney(topServer.hostname))
       && hackingLevel >= (ns.getServerRequiredHackingLevel(db[i].hostname))
