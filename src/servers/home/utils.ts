@@ -3,7 +3,7 @@ import { Logger } from '@/lib/logger';
 import { canCrackFTP, canCrackHTTP, canCrackSMTP, canCrackSQL, canCrackSSH } from '@/lib/defaults';
 import { buildServerDB, getServerData, readDB } from '@/lib/db';
 import { Server } from 'NetscriptDefinitions';
-import { calculateMaxThreadsForScript, determinePurchaseServerMaxRam, getTopServerByMoneyPerSecond } from '@/lib/calc';
+import { calculateMaxThreadsForScript, determineFactionFavorGained, determinePurchaseServerMaxRam, getTopServerByMoneyPerSecond } from '@/lib/calc';
 import * as consts from '@/lib/constants';
 import { printHackAlgorithm, printPrepAlgorithm } from '@/lib/hack-algorithm';
 
@@ -57,6 +57,13 @@ export async function main(ns: NS) {
         ns.tprint(`Usage: utils.js dryrun [target] [host]`);
       }
       break;
+    case "reptodonate":
+      if (ns.args[1]) {
+        await determineFactionFavorGained(ns, ns.args[1].toString());
+      } else {
+        ns.tprint(`Usage: utils.js repToDonate [faction]`);
+      }
+      break;
     default:
       ns.tprint(`
         utils.js [function] [...args]
@@ -76,6 +83,9 @@ export async function main(ns: NS) {
         killAll                     Kills all scripts on known servers
 
         dryRun [target] [host]      Prints out the prep and hack algorithms for [target] on [host]
+
+        repToDonate [faction]       Determines the reputation required to donate to
+                                    [faction] and logs the required reputation
         `);
       break;
   }
@@ -96,8 +106,8 @@ export async function printServerData(ns: NS, target: string) {
   const db: Server[] = await readDB(ns);
   const foundServer = db.find(server => server.hostname === target);
 
-  if (foundServer) { logger.tlog(JSON.stringify(foundServer, null, 2)); }
-  else { logger.tlog("Server not found."); }
+  if (foundServer) { logger.info(JSON.stringify(foundServer, null, 2), 0, true); }
+  else { logger.warn("Server not found.", 0, true); }
 }
 
 /**
@@ -130,7 +140,8 @@ export async function killAll(ns: NS) {
 export async function showTopServers(ns: NS) {
   const topServers = await getTopServerByMoneyPerSecond(ns);
   const purchasedServerLimit = ns.getPurchasedServerLimit();
-  for (let i = 0; i < purchasedServerLimit; i++) {
+  const ceiling = Math.min(topServers.length, purchasedServerLimit);
+  for (let i = 0; i < ceiling; i++) {
     const maxMoney = ns.getServerMaxMoney(topServers[i]);
     const hackTime = ns.getHackTime(topServers[i]);
     const growTime = ns.getGrowTime(topServers[i]);
@@ -159,7 +170,7 @@ export async function showTopServers(ns: NS) {
 export async function removeFilesFromServer(ns: NS, files: string[], server: string) {
   const logger = new Logger(ns);
   if (server == "home") {
-    logger.log("We're not deleting files off home. Aborting");
+    logger.warn("We're not deleting files off home. Aborting");
     return 2;
   }
 
@@ -168,9 +179,9 @@ export async function removeFilesFromServer(ns: NS, files: string[], server: str
 
   for (const file of allFiles) {
     if (files.includes(file)) {
-      logger.log(`Deleting ${file}...`);
+      logger.debug(`Deleting ${file}...`);
       if (!ns.rm(file, server)) {
-        logger.log(`Could not delete ${file}`);
+        logger.warn(`Could not delete ${file}`);
         allFilesDeleted = false;
       }
     }
@@ -189,7 +200,7 @@ export async function removeFilesFromServer(ns: NS, files: string[], server: str
 export async function deleteAllFilesOnServer(ns: NS, server: string, fileExtension?: string) {
   const logger = new Logger(ns);
   if (server = "home") {
-    logger.log("We're not deleting files off home. Aborting");
+    logger.warn("We're not deleting files off home. Aborting");
     return 2;
   }
   const allFiles = ns.ls(server);
@@ -222,13 +233,13 @@ export async function checkIfScriptsAlreadyRunning(ns: NS, scripts: string[], ta
 
   const logger = new Logger(ns);
 
-  logger.log("Checking if " + scripts.join(', ') + " are still running..");
+  logger.info("Checking if " + scripts.join(', ') + " are still running..");
   for (const script of runningScripts) {
     if (scripts.includes(script.filename)) {
       scriptsStillRunning = true;
     }
   }
-  logger.log("Done! stillRunning: " + scriptsStillRunning);
+  logger.info("Done! stillRunning: " + scriptsStillRunning);
 
   return scriptsStillRunning;
 }
@@ -247,14 +258,14 @@ export async function killScripts(ns: NS, scripts: string[], targetServer: strin
   const logger = new Logger(ns);
 
   // Iterate through and kill them
-  logger.log("Killing scripts..");
+  logger.info("Killing scripts..");
   for (const script of runningScripts) {
     if (scripts.includes(script.filename)) {
       ns.kill(script.filename, targetServer, ...script.args);
-      logger.log("  Killed " + script.filename + " on " + targetServer);
+      logger.debug("  Killed " + script.filename + " on " + targetServer);
     }
   }
-  logger.log("Done killing scripts!");
+  logger.info("Done killing scripts!", 1);
 
   // confirm scripts are all dead
   return !await checkIfScriptsAlreadyRunning(ns, scripts, targetServer);
@@ -276,7 +287,7 @@ export async function deployScript(ns: NS, script: string, targetServer: string,
   const scriptArray: string[] = [script];
 
   if (!await killScripts(ns, scriptArray, targetServer)) {
-    logger.log("Unable to kill still-running script. Aborting.");
+    logger.error("Unable to kill still-running script. Aborting.");
     return false;
   }
 
@@ -288,7 +299,7 @@ export async function deployScript(ns: NS, script: string, targetServer: string,
   const idealThreads = await calculateMaxThreadsForScript(ns, script, targetServer, sourceServer);
 
   if (idealThreads <= 0) {
-    logger.log("Not enough RAM to run script");
+    logger.error("Not enough RAM to run script");
     return false;
   }
 
@@ -301,7 +312,7 @@ export async function deployScript(ns: NS, script: string, targetServer: string,
   }
 
   if (pid === 0) {
-    logger.log(`Failed to execute script ${script} on server: ${targetServer}`);
+    logger.error(`Failed to execute script ${script} on server: ${targetServer}`);
   }
 
   return pid != 0;
@@ -323,7 +334,7 @@ export async function deployScriptNoOptimization(ns: NS, script: string, targetS
   const scriptArray: string[] = [script];
 
   if (!await killScripts(ns, scriptArray, targetServer)) {
-    logger.log("Unable to kill still-running script. Aborting.");
+    logger.error("Unable to kill still-running script. Aborting.");
     return false;
   }
 
@@ -341,7 +352,7 @@ export async function deployScriptNoOptimization(ns: NS, script: string, targetS
   }
 
   if (pid === 0) {
-    logger.log(`Failed to execute script ${script} on server: ${targetServer}`);
+    logger.error(`Failed to execute script ${script} on server: ${targetServer}`);
   }
 
   return pid != 0;
@@ -372,7 +383,7 @@ export async function rootServers(ns: NS, startServer: string = "home") {
   const logger = new Logger(ns);
   const rootedServers: string[] = [];
 
-  logger.log(`Rooting servers..`);
+  logger.info(`Rooting servers..`);
 
   await scanServer(startServer);
 
@@ -388,7 +399,7 @@ export async function rootServers(ns: NS, startServer: string = "home") {
       return;
     }
 
-    logger.log(`Scanning ${server}..`);
+    logger.debug(`Scanning ${server}..`);
 
     // Mark the server as scanned
     scannedServers.add(server);
@@ -421,34 +432,35 @@ export async function rootServer(ns: NS, server: string) {
   const logger = new Logger(ns);
   const serverData: Server = await getServerData(ns, server) as Server;
 
-  logger.log("Checking server: " + server + "...", 1);
+  logger.info("Checking server: " + server + "...", 1);
 
   let isScriptable: boolean = false;
 
 
-  logger.log(`Checking hack level..`, 2);
+  logger.debug(`Checking hack level..`, 2);
   if (ns.getHackingLevel() < ns.getServerRequiredHackingLevel(server)) {
-    logger.log("Hacking skill is too low, skipping", 3);
+    logger.debug("Hacking skill is too low, skipping", 3);
     return;
   }
-  logger.log(`It's hackable!`, 2);
+  logger.debug(`It's hackable!`, 2);
 
   // Root server if we don't have admin rights
-  logger.log(`Checking for admin rights..`, 2)
+  logger.debug(`Checking for admin rights..`, 2)
   
   if (!ns.hasRootAccess(server)) {
-    logger.log("No admin rights. Cracking..", 3)
+    logger.debug("No admin rights. Cracking..", 3)
     if (await openPorts(server)) {
       ns.nuke(server);
-      logger.log(`Ports opened and nuked!`, 3);
+      logger.debug(`Ports opened and nuked!`, 3);
       isScriptable = true;
     }
   } else { 
-    logger.log(`We have admin rights!`, 3);
+    logger.info(`We have admin rights!`, 3);
     isScriptable = true; 
   }
 
-  if (!serverData.backdoorInstalled) {
+  const backdoorInstalled: boolean = serverData?.backdoorInstalled ?? false;
+  if (backdoorInstalled) {
     //ns.print("Installing backdoor..");
     //await ns.singularity.installBackdoor();
   }
@@ -463,7 +475,7 @@ export async function rootServer(ns: NS, server: string) {
  * @param {Server} server - The server object to open ports on.
  */
   async function openPorts(server: string) {
-    logger.log("Cracking open ports..", 2);
+    logger.info("Cracking open ports..", 2);
     
 
     // Check how many ports are required vs. opened
@@ -471,7 +483,7 @@ export async function rootServer(ns: NS, server: string) {
     let numRequiredPorts: number = ns.getServerNumPortsRequired(server);
     let numOpenPorts: number = serverData.openPortCount ?? 0;
 
-    logger.log(numOpenPorts.toString() + " / " + numRequiredPorts.toString() + " ports opened", 3);
+    logger.debug(numOpenPorts.toString() + " / " + numRequiredPorts.toString() + " ports opened", 3);
 
     if (numRequiredPorts <= numOpenPorts) { return true; }
 
@@ -591,5 +603,4 @@ export async function waitForScriptsToFinish(ns: NS, pids: number[], delay: numb
   while (pids.some(pid => ns.isRunning(pid))) {
     await ns.sleep(delay); // Check every half second
   }
-  //logger.log(`Done waiting for pids: ${pids.join(', ')}`);
 }

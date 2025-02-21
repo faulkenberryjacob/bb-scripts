@@ -2,9 +2,11 @@ import { Logger } from '@/lib/logger';
 import { Server } from 'NetscriptDefinitions';
 import { buildServerDB, getServerData, readDB } from '@/lib/db';
 import { getOwnedServers } from './utils';
-import { canCrackFTP, canCrackHTTP, canCrackSMTP, canCrackSQL, canCrackSSH, getPurchasedServerNames } from '@/lib/defaults';
+import { canCrackFTP, canCrackHTTP, canCrackSMTP, canCrackSQL, canCrackSSH, getPurchasedServerNames, hasSingularity } from '@/lib/defaults';
 import * as consts from '@/lib/constants';
 import { formatDollar } from '@/lib/formatter';
+import { isPrepPossible } from '@/lib/hack-algorithm';
+import { getTopServerByMoneyPerSecond } from '@/lib/calc';
 
 export async function main(ns: NS) {
   ns.disableLog("ALL");
@@ -27,15 +29,15 @@ export async function main(ns: NS) {
     while(true) {
       
       // Recurse through and root all servers that we can, ignoring owned servers
-      logger.log("Rooting servers..");
+      logger.info("Rooting servers..");
       await rootServers(ns);
       
       // Build the DB for cheap server data
-      logger.log("Building DB..");
+      logger.info("Building DB..");
       await buildServerDB(ns);
       
       // Check available funds for purchasing servers. Try to fill out the limit before upgrading servers
-      logger.log(`Upgrading servers..`)
+      logger.info(`Upgrading servers..`)
       await spinUpServers(ns);
       
       // Run parasite on all servers we own every hour
@@ -51,17 +53,17 @@ export async function main(ns: NS) {
       serverCheck = (await readDB(ns)).filter(server => server.hasAdminRights == true).map(server => server.hostname);
       const differences: string[] = serverCheck.filter(server => !servers.includes(server));
       for (const newServer of differences) {
-        logger.tlog(`New server rooted: ${newServer}!`);
+        logger.info(`New server rooted: ${newServer}!`, 0, true);
       }
       servers = serverCheck;
     }
   } catch (error) {
-    logger.tlog(`ERROR -- ${scriptName} DIED -- `);
-    logger.tlog(`Error: ${error}`);
+    logger.error(`ERROR -- ${scriptName} DIED -- `);
+    logger.error(`Error: ${error}`);
   }
-  logger.tlog(`ERROR -- ${scriptName} DIED --`)
+  logger.error(`ERROR -- ${scriptName} DIED --`)
 
-  logger.tlog(`Attempting to respawn engine..`);
+  logger.info(`Attempting to respawn engine..`, 0, true);
   ns.spawn("engine.js", 500);
 }
 
@@ -76,19 +78,28 @@ async function runParasite(ns: NS): Promise<number> {
   // check if we own any purchased servers
   const ownedServers: string[] = ns.getPurchasedServers();
   const reqMem: number = ns.getScriptRam(`controller.js`) * 2;
+  const topServer: string = (await getTopServerByMoneyPerSecond(ns))[0];
+  const freeHomeRam: number = ns.getServerMaxRam("home")[0] - ns.getServerUsedRam("home")[1];
+  logger.debug(`Required ram: ${reqMem}`);
+
+  let returnCode = 0;
 
   if (ownedServers.length > 0 && ns.getServerMaxRam(ownedServers[0]) >= reqMem) {
     // since we own servers with enough RAM, let's run parasite on them
-    logger.tlog(`We own ${ownedServers.length} servers. Running parasite auto..`);
-    ns.exec(`parasite.js`, `home`, 1, `share`);
-    return ns.exec(`parasite.js`, `home`, 1, `auto`);
-  } else {
+    logger.info(`We own ${ownedServers.length} servers. Running parasite auto..`);
+    returnCode = ns.exec(`parasite.js`, `home`, 1, `auto`);
+  } else if (await isPrepPossible(ns, topServer, freeHomeRam)) {
     // if we don't own any servers or have enough RAM, run parasite on the home server
-    logger.tlog(`We don't own any servers or they don't have enough ram. Running parasite on home..`);
+    logger.info(`We don't own any servers or they don't have enough ram. Running parasite on home..`);
     ns.killall("home", true);
-    ns.exec(`parasite.js`, `home`, 1, `share`);
-    return ns.exec(`parasite.js`, `home`, 1, `home`);
+    returnCode = ns.exec(`parasite.js`, `home`, 1, `home`);
+  } else {
+    logger.info(`Not enough home RAM. Running parasite starter..`);
+    returnCode = ns.exec(`parasite.js`, `home`, 1, `starter`);
   }
+
+  ns.exec(`parasite.js`, `home`, 1, `share`);
+  return returnCode;
 }
 
 /**
@@ -104,7 +115,7 @@ async function rootServers(ns: NS, startServer: string = "home") {
   const rootedServers: string[] = [];
   const ownedServers: string[] = await getOwnedServers(ns);
 
-  logger.log(`Rooting servers..`);
+  logger.info(`Rooting servers..`);
 
   await scanServer(startServer);
 
@@ -120,7 +131,7 @@ async function rootServers(ns: NS, startServer: string = "home") {
       return;
     }
 
-    logger.log(`Scanning ${server}..`);
+    logger.info(`Scanning ${server}..`);
 
     // Mark the server as scanned
     scannedServers.add(server);
@@ -131,7 +142,7 @@ async function rootServers(ns: NS, startServer: string = "home") {
         rootedServers.push(rootServerReturn);
       }
     } else {
-      logger.log(`Skipping ${server} because we own it`, 2);
+      logger.debug(`Skipping ${server} because we own it`, 2);
     }
 
     // Get connected servers
@@ -158,35 +169,37 @@ async function rootServer(ns: NS, server: string) {
   const logger = new Logger(ns);
   const serverData: Server = await getServerData(ns, server) as Server;
 
-  logger.log("Checking server: " + server + "...", 1);
+  logger.info("Checking server: " + server + "...", 1);
 
   let isScriptable: boolean = false;
 
 
-  logger.log(`Checking hack level..`, 2);
+  logger.debug(`Checking hack level..`, 2);
   if (ns.getHackingLevel() < ns.getServerRequiredHackingLevel(server)) {
-    logger.log("Hacking skill is too low, skipping", 3);
+    logger.debug("Hacking skill is too low, skipping", 3);
     return;
   }
-  logger.log(`It's hackable!`, 2);
+  logger.debug(`It's hackable!`, 2);
 
   // Root server if we don't have admin rights
-  logger.log(`Checking for admin rights..`, 2)
+  logger.debug(`Checking for admin rights..`, 2)
   
   if (!ns.hasRootAccess(server)) {
-    logger.log("No admin rights. Cracking..", 3)
+    logger.debug("No admin rights. Cracking..", 3)
     if (openPorts(server)) {
       ns.nuke(server);
-      logger.log(`Ports opened and nuked!`, 3);
+      logger.debug(`Ports opened and nuked!`, 3);
       isScriptable = true;
     }
   } else { 
-    logger.log(`We have admin rights!`, 3);
+    logger.info(`We have admin rights!`, 3);
     isScriptable = true; 
   }
 
-  if (serverData.backdoorInstalled && !serverData.backdoorInstalled) {
+  const backdoorInstalled: boolean = serverData?.backdoorInstalled ?? true;
+  if (!backdoorInstalled && hasSingularity(ns)) {
     // do backdoor stuff
+    //await ns.singularity.installBackdoor();
   }
 
   if (!isScriptable) { return; }
@@ -199,7 +212,7 @@ async function rootServer(ns: NS, server: string) {
  * @param {Server} server - The server object to open ports on.
  */
   function openPorts(server: string) {
-    logger.log("Cracking open ports..", 2);
+    logger.info("Cracking open ports..", 2);
     
 
     // Check how many ports are required vs. opened
@@ -207,7 +220,7 @@ async function rootServer(ns: NS, server: string) {
     let numRequiredPorts: number = ns.getServerNumPortsRequired(server);
     let numOpenPorts: number = serverData.openPortCount ?? 0;
 
-    logger.log(numOpenPorts.toString() + " / " + numRequiredPorts.toString() + " ports opened", 3);
+    logger.debug(numOpenPorts.toString() + " / " + numRequiredPorts.toString() + " ports opened", 3);
 
     if (numRequiredPorts <= numOpenPorts) { return true; }
 
@@ -261,16 +274,16 @@ async function spinUpServers(ns: NS) {
 
       // if this server doesn't exist, purchase it
       if (!ns.serverExists(pServers[i])) {
-        logger.tlog(`Purchasing server ${pServers[i]} with ${desiredRam}GB of RAM for ${formatDollar(ns, cost)}`);
+        logger.info(`Purchasing server ${pServers[i]} with ${desiredRam}GB of RAM for ${formatDollar(ns, cost)}`, 0, true);
         ns.purchaseServer(pServers[i], desiredRam);
       } else {
         // if it already exists but with less ram, upgrade it
         if (ns.getServerMaxRam(pServers[i]) < desiredRam) {
           try {
-            logger.tlog(`Upgrading server ${pServers[i]} to ${desiredRam}GB of RAM for ${formatDollar(ns, cost)}`);
+            logger.info(`Upgrading server ${pServers[i]} to ${desiredRam}GB of RAM for ${formatDollar(ns, cost)}`, 0, true);
             ns.upgradePurchasedServer(pServers[i], desiredRam);
           } catch (error) {
-            logger.tlog(`Error upgrading server ${pServers[i]}: ${error}`);
+            logger.error(`Error upgrading server ${pServers[i]}: ${error}`);
           }
         }
       }

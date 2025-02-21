@@ -1,28 +1,28 @@
-import * as utils from '@/servers/home/utils';
+import * as consts from '@/lib/constants';
 import {Logger} from '@/lib/logger';
 
 export async function main(ns: NS) {
   const logger = new Logger(ns);
 
 
-  if (ns.exec('generator.ts', 'home', 1) != 0) {
-    logger.tlog(`[generator.ts] started successfully`);
+  if (ns.exec(consts.ENGINE_SCRIPT, 'home', 1) != 0) {
+    logger.info(`${consts.ENGINE_SCRIPT} started successfully`, 0, true);
   } else {
-    logger.tlog(`[generator.ts] FAILED`);
+    logger.error(`${consts.ENGINE_SCRIPT} FAILED`);
   }
 
-  await ns.sleep(2000);
+  await ns.sleep(1000);
 
-  if (ns.exec('parasite.ts', 'home', 1, ...['home']) != 0) {
-    logger.tlog(`[parasite.ts home] started successfully`);
+  if (ns.exec('parasite.js', 'home', 1, ...['home']) != 0) {
+    logger.info(`[parasite.js home] started successfully`, 0, true);
   } else {
-    logger.tlog(`[parasite.ts home] FAILED`);
+    logger.error(`[parasite.js home] FAILED`);
   }
 
-  if (ns.exec('parasite.ts', 'home', 1, ...['share']) != 0) {
-    logger.tlog(`[parasite.ts share] started successfully`);
+  if (ns.exec('parasite.js', 'home', 1, ...['share']) != 0) {
+    logger.info(`[parasite.js share] started successfully`, 0, true);
   } else {
-    logger.tlog(`[parasite.ts share] FAILED`);
+    logger.error(`[parasite.js share] FAILED`);
   }
 
 }

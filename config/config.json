@@ -1,0 +1,11 @@
+{
+  
+  "defaultServerPurchaseName": "host",
+
+  "defaultMoneyThreshold": 0.70,
+  "defaultSecurityThreshold": 1.20,
+
+  "homeRamBuffer": 24,
+  "moneyBuffer": 1000000
+
+}

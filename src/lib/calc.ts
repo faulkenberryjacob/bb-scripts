@@ -3,6 +3,7 @@ import * as consts from "./constants";
 import { Logger } from "./logger";
 import { maxHackAlgorithm, maxPrepAlgorithm } from "./hack-algorithm";
 import { formatDollar } from "./formatter";
+import { hasFormulas } from "./defaults";
 
 /**
  * Retrieves the top server based on the money generated per second.
@@ -12,7 +13,10 @@ import { formatDollar } from "./formatter";
  */
 export async function getTopServerByMoneyPerSecond(ns: NS) {
   const hackableServers = await getHackableServers(ns);
-  return hackableServers.sort((a, b) => calculateMoneyPerSecond(ns, b) - calculateMoneyPerSecond(ns, a));
+  const sortedServers: string[] = hackableServers
+                                  .sort((a, b) => calculateMoneyPerSecond(ns, b) - calculateMoneyPerSecond(ns, a))
+                                  .filter(server => calculateMoneyPerSecond(ns, server) > 0);
+  return sortedServers;
 }
 
 /**
@@ -55,6 +59,32 @@ export async function calculateMaxThreadsForScript(ns: NS, script: string, serve
 }
 
 /**
+ * Determines the faction favor gained and logs the required reputation to reach the favor needed to donate.
+ * 
+ * @param ns - The Netscript environment object.
+ * @param faction - The name of the faction for which to determine favor gained.
+ */
+export async function determineFactionFavorGained(ns: NS, faction: string): Promise<void> {
+  const logger = new Logger(ns);
+  const factions = ns.getPlayer().factions;
+  if (!factions.includes(faction)) {
+    ns.tprint(`Player is not a member of [${faction}]`);
+    ns.tprint(`Possible factions: ${factions.join(", ")}`);
+    return;
+  }
+
+  if (hasFormulas(ns)) {
+    const reqFavorToDonate = ns.getFavorToDonate();
+    const reqRepToDonate = ns.formulas.reputation.calculateFavorToRep(reqFavorToDonate);
+    ns.tprint(`Require [${ns.formatNumber(reqRepToDonate)}] reputation to reach [${reqFavorToDonate}] favor with [${faction}]`);
+    return;
+  } else {
+    ns.tprint(`[formulas] namespace not unlocked`);
+    return;
+  }
+}
+
+/**
  * Determines the maximum RAM that can be afforded for purchasing servers.
  * @param {NS} ns - The Netscript context.
  * @returns {number} - The maximum RAM that can be afforded for the servers.
@@ -76,7 +106,7 @@ export function determinePurchaseServerMaxRam(ns: NS, numServers?: number) {
     const cost = ns.getPurchasedServerCost(ram);
     const totalCost = cost * numToBuy;
 
-    logger.log(`Costs ${formatDollar(totalCost)}`),1
+    logger.log(`Costs ${formatDollar(ns, totalCost)}`),1
 
     if (totalCost <= playerMoney) {
       logger.log(`Can afford ${ram}!`,1);
@@ -110,7 +140,7 @@ export async function findLowestPowerOfTwo(num: number): Promise<number> {
  */
 export async function determineMinimumRamNeededForHack(ns: NS, target: string) {
   const logger = new Logger(ns);
-  logger.log(`Determining minimum ram needed for ${target}`);
+  logger.info(`Determining minimum ram needed for ${target}`);
 
   return findRamUntilHack(1);
 
@@ -118,7 +148,7 @@ export async function determineMinimumRamNeededForHack(ns: NS, target: string) {
     const ram = Math.pow(2, ramExponent);
     const { plan, hackPct } = await maxHackAlgorithm(ns, target, ram);
     if (plan.length > 0) {
-      logger.log(`Minimum ram needed for ${target} is ${ram}`, 1);
+      logger.info(`Minimum ram needed for ${target} is ${ram}`, 1);
       return ram;
     } else {
       await findRamUntilHack(ramExponent + 1);
@@ -135,7 +165,7 @@ export async function determineMinimumRamNeededForHack(ns: NS, target: string) {
  */
 export async function determineOptimumRamNeededForHack(ns: NS, target: string) {
   const logger = new Logger(ns);
-  logger.log(`Determining optimum ram needed for ${target}`);
+  logger.info(`Determining optimum ram needed for ${target}`);
 
   return findRamUntilHack(1);
 
@@ -143,7 +173,7 @@ export async function determineOptimumRamNeededForHack(ns: NS, target: string) {
     const ram = Math.pow(2, ramExponent);
     const { plan, hackPct } = await maxHackAlgorithm(ns, target, ram);
     if (hackPct == 1) {
-      logger.log(`Optimum ram needed for ${target} is ${ram}`, 1);
+      logger.info(`Optimum ram needed for ${target} is ${ram}`, 1);
       return ram;
     } else {
       return await findRamUntilHack(ramExponent + 1);
@@ -160,7 +190,7 @@ export async function determineOptimumRamNeededForHack(ns: NS, target: string) {
  */
 export async function determineMinimumRamNeededForPrep(ns: NS, target: string) {
   const logger = new Logger(ns);
-  logger.log(`Determining minimum ram needed for ${target}`);
+  logger.info(`Determining minimum ram needed for ${target}`);
 
   return findRamUntilPrep(1);
 
@@ -168,7 +198,7 @@ export async function determineMinimumRamNeededForPrep(ns: NS, target: string) {
     const ram = Math.pow(2, ramExponent);
     const { plan, growPct } = await maxPrepAlgorithm(ns, target, ram);
     if (plan.length > 0) {
-      logger.log(`Minimum ram needed for ${target} is ${ram}`, 1);
+      logger.info(`Minimum ram needed for ${target} is ${ram}`, 1);
       return ram;
     } else {
       await findRamUntilPrep(ramExponent + 1);
@@ -185,7 +215,7 @@ export async function determineMinimumRamNeededForPrep(ns: NS, target: string) {
  */
 export async function determineOptimumRamNeededForPrep(ns: NS, target: string) {
   const logger = new Logger(ns);
-  logger.log(`Determining optimum ram needed for ${target}`);
+  logger.info(`Determining optimum ram needed for ${target}`);
 
   return findRamUntilPrep(1);
 
@@ -193,7 +223,7 @@ export async function determineOptimumRamNeededForPrep(ns: NS, target: string) {
     const ram = Math.pow(2, ramExponent);
     const { plan, growPct } = await maxPrepAlgorithm(ns, target, ram);
     if (growPct == 1) {
-      logger.log(`Optimum ram needed for ${target} is ${ram}`, 1);
+      logger.info(`Optimum ram needed for ${target} is ${ram}`, 1);
       return ram;
     } else {
       return await findRamUntilPrep(ramExponent + 1);

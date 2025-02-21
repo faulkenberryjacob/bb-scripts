@@ -1,13 +1,11 @@
+// ________________________________________________________________________________ 
+//    Hack algorithm types 
+// ````````````````````````````````````````````````````````````````````````````````
+
 export type Worker = {
     pid: number,
     script: string,
     value: number
-}
-
-export enum GameState { 
-  Early = 0,
-  Mid = 1,
-  End = 2
 }
 
 export type Controller = {
@@ -16,6 +14,18 @@ export type Controller = {
   pid: number,
   args?: string[]
 }
+
+export type Plan = {
+  script: string,
+  threads: number,
+  args: string[],
+  runTime: number
+}
+
+
+// ________________________________________________________________________________ 
+//    GO types 
+// ````````````````````````````````````````````````````````````````````````````````
 
 export type Move = {
     type: "move" | "pass" | "gameOver";
@@ -41,9 +51,11 @@ export type AdjacentNodes = {
     west: string  | undefined
 };
 
-export type Plan = {
-  script: string,
-  threads: number,
-  args: string[],
-  runTime: number
+
+// ________________________________________________________________________________ 
+//    Gang types 
+// ````````````````````````````````````````````````````````````````````````````````
+
+export type GangEquipment = {
+  [type: string]: string[];
 }

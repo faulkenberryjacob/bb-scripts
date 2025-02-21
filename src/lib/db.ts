@@ -129,7 +129,7 @@ export async function getTopServerWithMaxMoney(ns: NS) {
   const db = await readDB(ns);
   const logger = new Logger(ns);
 
-  logger.log("DB has " + db.length.toString() + " entries.");
+  logger.info("DB has " + db.length.toString() + " entries.");
 
   let topServer: Server = db[db.length - 1];
   const hackingLevel: number = ns.getHackingLevel();
@@ -137,13 +137,13 @@ export async function getTopServerWithMaxMoney(ns: NS) {
   for (let i = 0; i < db.length; i++) {
     const serverMoney = ns.getServerMaxMoney(db[i].hostname);
     const requiredLevel = ns.getServerRequiredHackingLevel(db[i].hostname);
-    logger.log(`Checking ${db[i].hostname} with ${formatDollar(ns, serverMoney)} and required hacking ${requiredLevel}...`);
+    logger.info(`Checking ${db[i].hostname} with ${formatDollar(ns, serverMoney)} and required hacking ${requiredLevel}...`);
 
     if (serverMoney > (ns.getServerMaxMoney(topServer.hostname))
       && hackingLevel >= (ns.getServerRequiredHackingLevel(db[i].hostname))
       && getPortsCanCrack(ns) >= ns.getServerNumPortsRequired(db[i].hostname)) {
       topServer = db[i];
-      logger.log(`\t${db[i].hostname} matches!`)
+      logger.info(`\t${db[i].hostname} matches!`)
     }
   }
 

@@ -9,11 +9,8 @@ export async function main(ns: NS) {
   switch (arg) {
     case "dryrun":
       if (ns.args[1] && ns.args[2]) {
-        //logger.tlog("Prep Algorithm:");
         await printPrepAlgorithm(ns, ns.args[1].toString(), ns.args[2].toString());
 
-        //logger.tlog("");
-        //logger.tlog("Hack Algorithm:");
         await printHackAlgorithm(ns, ns.args[1].toString(), ns.args[2].toString());
       } else {
         ns.tprint("Missing args! Require targetServer and sourceServer");
@@ -46,10 +43,10 @@ export async function printPrepAlgorithm(ns: NS, targetServer: string, sourceSer
   const moneyAvailable = formatDollar(ns, ns.getServerMoneyAvailable(targetServer));
   const currentSecurity = ns.getServerSecurityLevel(targetServer);
 
-  logger.tlog(`${targetServer} has ${moneyAvailable} with security level ${currentSecurity}`);
+  logger.info(`${targetServer} has ${moneyAvailable} with security level ${currentSecurity}`, 0, true);
   for (const step of plan) {
     const finishTime = formatTime(step.runTime + Number(step.args[1]));
-    logger.tlog(`\tWould run ${step.script} with ${step.threads} threads, finshing in ${finishTime}`);
+    logger.info(`\tWould run ${step.script} with ${step.threads} threads, finshing in ${finishTime}`, 0, true);
   }
   return;
 }
@@ -68,10 +65,10 @@ export async function printHackAlgorithm(ns: NS, targetServer: string, sourceSer
   const moneyAvailable = formatDollar(ns, ns.getServerMoneyAvailable(targetServer));
   const currentSecurity = ns.getServerSecurityLevel(targetServer);
 
-  logger.tlog(`${targetServer} has ${moneyAvailable} with security level ${currentSecurity}`);
+  logger.info(`${targetServer} has ${moneyAvailable} with security level ${currentSecurity}`, 0, true);
   for (const step of plan) {
     const finishTime = formatTime(step.runTime + Number(step.args[1]));
-    logger.tlog(`\tWould run ${step.script} with ${step.threads} threads, finshing in ${finishTime}`);
+    logger.info(`\tWould run ${step.script} with ${step.threads} threads, finshing in ${finishTime}`, 0, true);
   }
   return;
 }
@@ -110,10 +107,10 @@ export async function maxHackAlgorithm(ns: NS, targetServer: string, availableRa
   const logger = new Logger(ns);
   const db = 
 
-  logger.log(`Starting max hack algorithm`);
+  logger.info(`Starting max hack algorithm`);
 
   if (!ns.serverExists(targetServer)) {
-    logger.log(`${targetServer} isn't a valid server!`, 1);
+    logger.error(`${targetServer} isn't a valid server!`, 1);
     return { plan: [], hackPct: 0 };
   }
 
@@ -148,7 +145,7 @@ export async function maxHackAlgorithm(ns: NS, targetServer: string, availableRa
     hackPercent = parseFloat(hackPercent.toFixed(2));
 
     if (hackPercent <= 0) {
-      logger.log(`hackPercent hit ${hackPercent}, no solutions found`)
+      logger.error(`hackPercent hit ${hackPercent}, no solutions found`)
       return { plan: [], hackPct: 0 };
     }
 
@@ -156,7 +153,7 @@ export async function maxHackAlgorithm(ns: NS, targetServer: string, availableRa
     const hackAmount = (currentMoney * hackPercent);
     const hackThreads = Math.floor(ns.hackAnalyzeThreads(targetServer, hackAmount));
     if (hackThreads <= -1) {
-      logger.log(`hackAnalyzeThreads returned ${hackThreads} for hackAmount ${hackAmount} with hackPercent ${hackPercent}.`);
+      logger.error(`hackAnalyzeThreads returned ${hackThreads} for hackAmount ${hackAmount} with hackPercent ${hackPercent}.`);
       const error: Plan[] = [];
       return { plan: [], hackPct: 0 };
     }
@@ -183,12 +180,9 @@ export async function maxHackAlgorithm(ns: NS, targetServer: string, availableRa
     // if this uses too much RAM, let's try again but reduce 5% hack
     const totalRamUsed = (hackThreads * hackRam) + (growThreads * growRam) + (totalWeakenThreads * weakenRam);
 
-    logger.log(`hackSecurityIncrease (${hackSecurityIncrease}), moneyAfterHack (${moneyAfterHack}), growSecurityIncrease (${growSecurityIncrease})`)
-    logger.log(`Hack algorithm [${hackPercent}]: hack (${hackThreads}), weakenHack (${weakenThreadsForHack}), grow (${growThreads}) , weakenGrow (${weakenThreadsForGrow}), cores ${cores}`,1)
-
     if (totalRamUsed > serverRam ) { return await findMaxHackPercentageForAlgorithm(hackPercent-decayRate); }
     else if (totalRamUsed < 0) { 
-      logger.tlog(`ERROR -- totalRamUsed hit (${totalRamUsed}), aborting..`);
+      logger.error(`totalRamUsed hit (${totalRamUsed}), aborting..`);
       return { plan: [], hackPct: 0 };
     }
     
@@ -249,11 +243,7 @@ export async function maxHackAlgorithm(ns: NS, targetServer: string, availableRa
         resultArray.push(weakenGrowInterface);  
       }   
 
-      logger.log(`Ideal plan determine with hackPercent [${hackPercent.toString()}] using ${totalRamUsed} RAM`);
-
-      // for (let p = 0; p < resultArray.length; p++) {
-      //   logger.log(`${resultArray[p].script} (${resultArray[p].threads}) with runTime: ${formatTime(resultArray[p].runTime)} and args ${resultArray[p].args.join(', ')}`);
-      // }
+      logger.info(`Ideal plan determine with hackPercent [${hackPercent.toString()}] using ${totalRamUsed} RAM`);
 
       return { plan: resultArray, hackPct: hackPercent};
     }
@@ -275,7 +265,7 @@ export async function maxHackAlgorithm(ns: NS, targetServer: string, availableRa
 export async function maxPrepAlgorithm(ns: NS, targetServer: string, availableRam: number, cores: number = 1, ramBuffer: number = 0): Promise<{plan: Plan[], growPct?: number}> {
   const logger = new Logger(ns);
 
-  logger.log(`Starting prep algorithm`);
+  logger.info(`Starting prep algorithm`);
 
   const resultArray: Plan[] = [];
 
@@ -307,11 +297,6 @@ export async function maxPrepAlgorithm(ns: NS, targetServer: string, availableRa
   async function findQuickestPrepAlgorithm(growPercent: number, weakenPercent: number = 1.00): Promise<{plan: Plan[], growPct?: number}> {
     growPercent   = parseFloat(growPercent.toFixed(2));
     weakenPercent = parseFloat(weakenPercent.toFixed(2));
-
-    // if (growPercent <= 0.0500 && weakenPercent <= 0.0500) {
-    //   logger.log(`ERROR -- growPercent (${growPercent}), weakenPercent (${weakenPercent}) too low. No prep solution found.`);
-    //   return [];
-    // }
     
     // Calculate the number of threads needed to grow the server to max money
     const growThreads = Math.ceil(growPercent * ns.growthAnalyze(targetServer, maxMoney / Math.max(ns.getServerMoneyAvailable(targetServer), 1), cores));
@@ -325,11 +310,10 @@ export async function maxPrepAlgorithm(ns: NS, targetServer: string, availableRa
 
     // Ensure there is enough RAM to run the scripts
     const totalRamUsed = (growThreads * growRam) + (weakenThreads * weakenRam);
-    logger.log(`Prep algorithm: growPercent ${growPercent} gives ${growThreads} threads, weakenPercent ${weakenPercent} gives ${weakenThreads} threads = ${totalRamUsed} RAM`, 1);
 
     // if there's a failure somewhere, exit
     if (totalRamUsed <= 0) {
-      logger.tlog(`ERROR -- totalRamUsed returned ${totalRamUsed}`);
+      logger.error(`totalRamUsed returned ${totalRamUsed}`);
       return {plan: [], growPct: 0};
 
     // if we're using too much RAM and our decays haven't hit rock bottom, recurse
@@ -344,7 +328,7 @@ export async function maxPrepAlgorithm(ns: NS, targetServer: string, availableRa
 
     // if we hit rock bottom, exit
     } else if (growPercent <= decayRate && weakenPercent <= decayRate) {
-      logger.log(`ERROR - Could not find any prep plans`);
+      logger.error(`Could not find any prep plans`);
       return { plan: [], growPct: 0 };
     }
     
@@ -391,12 +375,7 @@ export async function maxPrepAlgorithm(ns: NS, targetServer: string, availableRa
         resultArray.push(weakenInterface);
       }
 
-
-      logger.log(`Ideal plan determined with ${growPercent.toString()}, ${weakenPercent.toString()} decays using ${totalRamUsed} RAM`);
-      // for (let p = 0; p < resultArray.length; p++) {
-      //   logger.log(resultArray[p].script + "(" + resultArray[p].threads + ")" + " with runTime: " + formatTime(resultArray[p].runTime) 
-      //   + " ms and args: " + resultArray[p].args + " ms");
-      // }
+      logger.info(`Ideal plan determined with ${growPercent.toString()}, ${weakenPercent.toString()} decays using ${totalRamUsed} RAM`);
 
       return {plan: resultArray, growPct: growPercent};
     }

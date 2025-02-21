@@ -77,26 +77,26 @@ export async function main(ns: NS) {
     // get top servers by top money hacked per second * hackChance
     const topServers = await getTopServerByMoneyPerSecond(ns);
 
-    logger.tlog(`Targeting top servers (${topServers.length}): ${topServers.join(', ')}`);
+    logger.info(`Targeting top servers (${topServers.length}): ${topServers.join(', ')}`, 0, true);
 
     const successfulSpinUp: boolean = await spinUpServers(topServers.length);
     if (!successfulSpinUp) {
-      logger.tlog("WARNING: Unable to get desired server amount. Have " + ns.getPurchasedServers().length.toString() + "/" + topServers.length.toString(), 1);
+      logger.warn("Unable to get desired server amount. Have " + ns.getPurchasedServers().length.toString() + "/" + topServers.length.toString(), 1, true);
     } else {
-      logger.tlog("We have enough servers! (" + ns.getPurchasedServers().length.toString() + ")", 1);
+      logger.info("We have enough servers! (" + ns.getPurchasedServers().length.toString() + ")", 1, true);
     }
 
     const filesToCopy: string[]    = [consts.CONTROLLER_SCRIPT, consts.WEAK_SCRIPT, consts.GROW_SCRIPT, 
-                                      consts.HACK_SCRIPT, consts.HACK_ALGO_SCRIPT, getUtilsName()];
+                                      consts.HACK_SCRIPT, consts.HACK_ALGO_SCRIPT, consts.CONFIG, getUtilsName()];
     const argsForController: string[] = [];
 
     // assume this is trying to fill up ALL purchased servers
     const kickoffFailures: Set<string> = await kickoffControllers(topServers, filesToCopy, argsForController);
     if (kickoffFailures.size > 0) {
-      logger.tlog("WARNING: " + kickoffFailures.size.toString() + " controllers failed to kickoff.", 1);
-      logger.tlog(Array.from(kickoffFailures).join(", "), 2);
+      logger.warn("WARNING: " + kickoffFailures.size.toString() + " controllers failed to kickoff.", 1, true);
+      logger.warn(Array.from(kickoffFailures).join(", "), 2, true);
     } else {
-      logger.tlog("All controllers kicked off successfully!", 1);
+      logger.info("All controllers kicked off successfully!", 1, true);
     }
 
     return 0;
@@ -122,7 +122,7 @@ export async function main(ns: NS) {
       if (server != "home") {
         const idealThreads: number = await calculateMaxThreadsForScript(ns, script, server);
         if (idealThreads <= 0 ) {
-          logger.log(`No available threads on ${server}, skipping..`);
+          logger.info(`No available threads on ${server}, skipping..`);
           continue;
         }
         ns.killall(server);
@@ -143,19 +143,19 @@ export async function main(ns: NS) {
   async function parasiteHome(host: string) {
     const target = await getServerData(ns, host);
     if (!target) {
-      logger.tlog(host + " is not found in serverDB!", 1);
+      logger.error(host + " is not found in serverDB!", 1);
       return 2;
     }
-    logger.tlog(host + " found!", 1);
+    logger.info(host + " found!", 1, true);
 
     if (!(await rootServer(ns, target.hostname))) {
-      logger.tlog("Server is not scriptable, aborting.", 1);
+      logger.warn("Server is not scriptable, aborting.", 1, true);
       return 2;
     }
-    logger.tlog(host + " is scriptable!", 1);
+    logger.info(host + " is scriptable!", 1, true);
 
     if (ns.exec(consts.CONTROLLER_SCRIPT, "home", 1, host) == 0) {
-        logger.tlog("ERROR -- Could not start " + consts.CONTROLLER_SCRIPT + " on home", 3);
+        logger.error("Could not start " + consts.CONTROLLER_SCRIPT + " on home", 3);
         return 2;
     }
 
@@ -171,7 +171,7 @@ export async function main(ns: NS) {
     const topServers: string[] = await getTopServerByMoneyPerSecond(ns);
     const bigMoneyTarget: string = topServers.length > 0 ? topServers[0] : "";
     if (!bigMoneyTarget || bigMoneyTarget == "") {
-      logger.tlog("No servers found!", 1);
+      logger.warn("No servers found!", 1, true);
       return 2;
     }
     if (onHome) {
@@ -190,37 +190,37 @@ export async function main(ns: NS) {
   async function parasiteTarget(host: string) {
     const target = await getServerData(ns, host);
     if (!target) {
-      logger.tlog(host + " is not found in serverDB!", 1);
+      logger.warn(host + " is not found in serverDB!", 1, true);
       return 2;
     }
-    logger.tlog(host + " found!", 1);
+    logger.info(host + " found!", 1, true);
 
     if (!(await rootServer(ns, target.hostname))) {
-      logger.tlog("Server is not scriptable, aborting.", 1);
+      logger.warn("Server is not scriptable, aborting.", 1, true);
       return 2;
     }
-    logger.tlog(host + " is scriptable!", 1);
+    logger.info(host + " is scriptable!", 1, true);
 
     const desiredServerAmount: number = 1;
 
     if (!await spinUpServers(desiredServerAmount)) {
-      logger.tlog("WARNING: Unable to get desired server amount. Have " + ns.getPurchasedServers().length.toString() + "/" + desiredServerAmount.toString(), 1);
+      logger.warn("Unable to get desired server amount. Have " + ns.getPurchasedServers().length.toString() + "/" + desiredServerAmount.toString(), 1);
     } else {
-      logger.tlog("We have enough servers! (" + ns.getPurchasedServers().length.toString() + ")", 1);
+      logger.info("We have enough servers! (" + ns.getPurchasedServers().length.toString() + ")", 1, true);
     }
 
     const targetArray: string[]    = [target.hostname];
     const filesToCopy: string[]    = [consts.CONTROLLER_SCRIPT, consts.WEAK_SCRIPT, consts.GROW_SCRIPT, 
-                                      consts.HACK_SCRIPT, consts.HACK_ALGO_SCRIPT, await getUtilsName()];
+                                      consts.HACK_SCRIPT, consts.HACK_ALGO_SCRIPT, consts.CONFIG, await getUtilsName()];
     const argsForController: string[] = [];
 
     // assume this is trying to fill up ALL purchased servers
     const kickoffFailures: Set<string> = await kickoffControllers(targetArray, filesToCopy, argsForController);
     if (kickoffFailures.size > 0) {
-      logger.tlog("WARNING: " + kickoffFailures.size.toString() + " factories failed to kickoff.", 1);
-      logger.tlog(Array.from(kickoffFailures).join(", "), 2);
+      logger.warn(kickoffFailures.size.toString() + " factories failed to kickoff.", 1, true);
+      logger.warn(Array.from(kickoffFailures).join(", "), 2, true);
     } else {
-      logger.tlog("All factories kicked off successfully!", 1);
+      logger.info("All factories kicked off successfully!", 1, true);
     }
 
     return 0;
@@ -247,9 +247,9 @@ export async function main(ns: NS) {
       generatedServerNames.push(newServerName);
     }
 
-    logger.tlog("Owned servers: " + purchasedServers.length + "/" + serverCeiling.toString(), 1);
+    logger.info("Owned servers: " + purchasedServers.length + "/" + serverCeiling.toString(), 1, true);
 
-    logger.tlog("Checking servers..", 1);
+    logger.info("Checking servers..", 1, true);
 
     for (let a = 0; a < serverCeiling; a++) {
       requestServer(generatedServerNames[a], requestedRam);
@@ -280,18 +280,17 @@ export async function main(ns: NS) {
     const deploymentNum = fillServers ? numPurchasedServers : maxFactories;
     
     for (let b = 0; b < deploymentNum; b++) {
-      logger.log("Copying over files: " + filesToCopy, 1);
-      logger.log("to: " + purchasedServers[b], 2);
+      logger.debug(`Sending following files to ${purchasedServers[b]}: ${filesToCopy}`, 2)
       const distribute: number = b % targets.length;
 
       // kill all scripts then SCP over
       ns.killall(purchasedServers[b]);
       ns.scp(filesToCopy, purchasedServers[b], CURRENT_SERVER.hostname);
       if (ns.exec(consts.CONTROLLER_SCRIPT, purchasedServers[b], 1, targets[distribute]) == 0) {
-        logger.tlog("ERROR -- Could not start " + consts.CONTROLLER_SCRIPT + " on " + purchasedServers[b], 3);
+        logger.error("Could not start " + consts.CONTROLLER_SCRIPT + " on " + purchasedServers[b], 3);
         failedFactories.add(purchasedServers[b]);
       }
-      logger.tlog(`Controller on ${purchasedServers[b]} has been started targeting ${targets[distribute]}`);
+      logger.info(`Controller on ${purchasedServers[b]} has been started targeting ${targets[distribute]}`, 2, true);
       await ns.sleep(30);
     }
 
@@ -305,9 +304,9 @@ export async function main(ns: NS) {
    * @returns {boolean} - True if the server was successfully purchased, false otherwise.
    */
   function requestServer(name: string, ram: number) {
-    logger.log("Requesting server " + name + " with RAM " + ram.toString() + "...", 1);
+    logger.debug("Requesting server " + name + " with RAM " + ram.toString() + "...", 1);
     if (name == "") {
-      logger.tlog("Server is undefined, cannot request", 2);
+      logger.warn("Server is undefined, cannot request", 2, true);
       return false
     }
     const purchasedServers = ns.getPurchasedServers();
@@ -316,32 +315,32 @@ export async function main(ns: NS) {
     const currentMoney: number = ns.getServerMoneyAvailable("home");
     const purchaseCost: number = ns.getPurchasedServerCost(ram);
     if (currentMoney < purchaseCost) {
-      logger.tlog(`Cannot afford ${name}. Cost: ${formatDollar(ns, purchaseCost)}`, 2);
+      logger.warn(`Cannot afford ${name}. Cost: ${formatDollar(ns, purchaseCost)}`, 2, true);
       return false;
     }
 
     // check for already-purchased hostnames and upscale
     if (purchasedServers.includes(name)) { 
       if (ns.getServerMaxRam(name) < ram) {
-        logger.tlog(`${name} already exists with less RAM. Upgrading to ${ram} RAM`, 2);
+        logger.info(`${name} already exists with less RAM. Upgrading to ${ram} RAM`, 2, true);
         ns.killall(name);
         return ns.upgradePurchasedServer(name, ram);
       } else {
-        logger.log(`Already own ${name} with appropriate ram ${ram}, skipping`);
+        logger.info(`Already own ${name} with appropriate ram ${ram}, skipping`);
         return true;
       }
     }
 
     // check if we have enough server slots
     if ((ns.getPurchasedServerLimit() - purchasedServers.length) <= 0) {
-      logger.tlog("Server limit size reached. Cannot request", 2);
+      logger.info("Server limit size reached. Cannot request", 2, true);
       return false;
     }
 
     // otherwise, purchase it
     else {
       const newServerName: string = ns.purchaseServer(name, ram);
-      logger.tlog("Purchasing server [" + newServerName + "] with RAM " + ram.toString() + " for $" + ns.formatNumber(purchaseCost), 2);
+      logger.info("Purchasing server [" + newServerName + "] with RAM " + ram.toString() + " for $" + ns.formatNumber(purchaseCost), 2, true);
       return newServerName != "";
     }
   }

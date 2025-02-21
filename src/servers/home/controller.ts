@@ -38,8 +38,9 @@
 //import * as utils from 'utils';
 import { Worker } from '@/lib/types';
 import { Logger } from '@/lib/logger';
-import { formatTime } from '@/lib/formatter';
+import { formatTime, formatDollar } from '@/lib/formatter';
 import { maxHackAlgorithm, maxPrepAlgorithm } from '@/lib/hack-algorithm';
+import * as consts from '@/lib/constants';
 
 export async function main(ns: NS) {
   const TARGET_HOSTNAME: string = ns.args[0].toString();
@@ -51,8 +52,8 @@ export async function main(ns: NS) {
   const handler = ns.getPortHandle(PORT);
   handler.clear();
 
-  logger.log(`--- FACTORY STARTUP targeting ${TARGET_HOSTNAME} ---`);
-  logger.log(`---- HOSTED ON ${CURRENT_SERVER} ---- `)
+  logger.info(`--- FACTORY STARTUP targeting ${TARGET_HOSTNAME} ---`);
+  logger.info(`---- HOSTED ON ${CURRENT_SERVER} ---- `)
 
   const maxMoney = ns.getServerMaxMoney(TARGET_HOSTNAME);
   const minSecurity = ns.getServerMinSecurityLevel(TARGET_HOSTNAME);
@@ -60,15 +61,21 @@ export async function main(ns: NS) {
   // return if no money can be made
   if (maxMoney <= 0) { return; }
   while (true) {
-    logger.log(`Security: ${ns.getServerSecurityLevel(TARGET_HOSTNAME)} /  ${ns.getServerMinSecurityLevel(TARGET_HOSTNAME)}`);
-    logger.log(`Money: ${ns.formatNumber(ns.getServerMoneyAvailable(TARGET_HOSTNAME))} / ${ns.formatNumber(ns.getServerMaxMoney(TARGET_HOSTNAME))}`);
+    const moneyAvailable: number = ns.getServerMoneyAvailable(TARGET_HOSTNAME);
+    const securityLevel: number  = ns.getServerSecurityLevel(TARGET_HOSTNAME);
 
-    const moneyNotMaxed = ns.getServerMoneyAvailable(TARGET_HOSTNAME) < maxMoney;
-    const securityNotMinimal = ns.getServerSecurityLevel(TARGET_HOSTNAME) > minSecurity;
-    if (moneyNotMaxed || securityNotMinimal) {
-      const isPrepped: boolean = await prepServer(TARGET_HOSTNAME);
-      if (!isPrepped) {
-        logger.log(`Could not find prep algorithm for ${TARGET_HOSTNAME}, aborting`);
+    const moneyThresh = maxMoney * consts.MONEY_THRESHOLD;
+    const securityThresh = minSecurity * consts.SECURITY_THRESHOLD;
+
+    logger.info(`Security: ${securityLevel} /  ${ns.getServerMinSecurityLevel(TARGET_HOSTNAME)}`);
+    logger.info(`Money: ${formatDollar(ns, moneyAvailable)} / ${formatDollar(ns, ns.getServerMaxMoney(TARGET_HOSTNAME))}`);
+
+    // check if we're within acceptable thresholds for money and security
+    // i.e. if the server has 92% of its available money and is at 108% of min security, that's okay
+    const isPrepped: boolean = moneyAvailable > moneyThresh && securityLevel < securityThresh;
+    if (!isPrepped) {
+      if (!(await prepServer(TARGET_HOSTNAME))) {
+        logger.error(`Could not find prep algorithm for ${TARGET_HOSTNAME} on ${CURRENT_SERVER}, aborting`);
         return;
       }
     } else {
@@ -81,14 +88,14 @@ export async function main(ns: NS) {
    * @param {string} target - The target server to prepare.
    */
   async function prepServer(target: string) {
-    logger.log(`--- PREP START ------------------------------`);
+    logger.info(`--- PREP START ------------------------------`);
     let prepPids: Set<number> = new Set;
 
     // loop growing/weakening until we hit our desired threshold
     const availableRam = ns.getServerMaxRam(CURRENT_SERVER) - ns.getServerUsedRam(CURRENT_SERVER);
     const { plan, growPct } = await maxPrepAlgorithm(ns, target, availableRam);
     if (plan.length == 0 ) {
-      logger.log(`ERROR (${CURRENT_SERVER}) -- no PREP algorithm found for ${TARGET_HOSTNAME}, aborting`);
+      logger.error(`(${CURRENT_SERVER}) -- no PREP algorithm found for ${TARGET_HOSTNAME}, aborting`);
       return false;
     }
 
@@ -101,21 +108,21 @@ export async function main(ns: NS) {
       // start the worker
       const pid = ns.exec(plan[i].script, CURRENT_SERVER, plan[i].threads, ...plan[i].args)
       if (pid == 0) {
-        logger.tlog(`ERROR: ns.exec(${plan[i].script}, ${CURRENT_SERVER}, ${plan[i].threads}, ${plan[i].args.join(', ')} failed)`);
+        logger.error(`ns.exec(${plan[i].script}, ${CURRENT_SERVER}, ${plan[i].threads}, ${plan[i].args.join(', ')} failed)`);
         break;
       } else {
         prepPids.add(pid);
         const executeTime = plan[i].runTime + Number(plan[i].args[1]);
         const strExecuteTime = formatTime(executeTime);
 
-        logger.log(`${plan[i].script} (${plan[i].threads}) with args ${plan[i].args} will execute in ${strExecuteTime}`, 1);
+        logger.info(`${plan[i].script} (${plan[i].threads}) with args ${plan[i].args} will execute in ${strExecuteTime}`, 1);
       }
     }
 
     // watch our PORT for any reporting workers. when they report, aggregate their
     // data and remove them from the pid set. Once the pid set is empty, we know
     // all our workers are done
-    logger.log(`Watching port ${PORT} and waiting for workers to finish..`);
+    logger.info(`Watching port ${PORT} and waiting for workers to finish..`);
     let scriptsRunning = true;
     let counter = 0;
     while (scriptsRunning) {
@@ -123,19 +130,19 @@ export async function main(ns: NS) {
         // we have data! parse the JSON and assume it's one of our worker types
         const data: Worker = JSON.parse(await handler.read());
         if (prepPids.has(data.pid)) {
-          logger.log(`Worker ${data.script} (${data.pid}) reported!`,1)
+          logger.info(`Worker ${data.script} (${data.pid}) reported!`,1)
           switch (data.script) {
             case `hack.ts`:
-              logger.log(`HACK stole ${ns.formatNumber(data.value)}`,2);
+              logger.info(`HACK stole ${ns.formatNumber(data.value)}`,2);
               break;
             case `grow.ts`:
-              logger.log(`GROW ${ns.formatNumber(data.value)}, putting money at ${ns.getServerMoneyAvailable(TARGET_HOSTNAME)} / ${maxMoney}`,2)
+              logger.info(`GROW ${ns.formatNumber(data.value)}, putting money at ${ns.getServerMoneyAvailable(TARGET_HOSTNAME)} / ${maxMoney}`,2)
               break;
             case `weaken.ts`:
-              logger.log(`WEAKEN ${data.value}, putting security at ${ns.getServerSecurityLevel(TARGET_HOSTNAME)} / ${minSecurity}`,2);
+              logger.info(`WEAKEN ${data.value}, putting security at ${ns.getServerSecurityLevel(TARGET_HOSTNAME)} / ${minSecurity}`,2);
               break;
             default:
-              logger.log(`UNKNOWN data: ${data.pid}, ${data.script}, ${data.value}`,2);
+              logger.warn(`UNKNOWN data: ${data.pid}, ${data.script}, ${data.value}`,2);
               break;
           }
 
@@ -158,15 +165,15 @@ export async function main(ns: NS) {
       if (counter >= 2400) {
         counter = 0;
         const pidsString = Array.from(prepPids).join(', ');
-        logger.log(`Waiting on PIDS: ${pidsString}`);
+        logger.info(`Waiting on PIDS: ${pidsString}`);
       }
     }
 
     const usedRamPercent = parseFloat((ns.getServerUsedRam(CURRENT_SERVER) / ns.getServerMaxRam(CURRENT_SERVER)).toFixed(2));
-    logger.log(`Done waiting! Server is using ${usedRamPercent}% RAM`, 1);
+    logger.info(`Done waiting! Server is using ${usedRamPercent}% RAM`, 1);
 
-    logger.log(`---------------------------------`);
-    logger.log("");
+    logger.info(`---------------------------------`);
+    logger.info("");
     return true;
   }
 
@@ -175,16 +182,16 @@ export async function main(ns: NS) {
    * @param {string} target - The target server to hack.
    */
   async function hackServer(target: string) {
-    logger.log(`--- HACK START ------------------------------`);
+    logger.info(`--- HACK START ------------------------------`);
     let hackPids: Set<number> = new Set;
 
     // get the algorithm plan
     const availableRam = ns.getServerMaxRam(CURRENT_SERVER) - ns.getServerUsedRam(CURRENT_SERVER);
     const { plan, hackPct } = await maxHackAlgorithm(ns, TARGET_HOSTNAME, availableRam);
     if (plan.length == 0) {
-      logger.tlog(`ERROR (${CURRENT_SERVER}) -- no HACK algorithm found for ${TARGET_HOSTNAME}, returning to prep`);
-      logger.log(`Security: ${ns.getServerSecurityLevel(target)} /  ${ns.getServerMinSecurityLevel(target)}`,1);
-      logger.log(`Money: ${ns.formatNumber(ns.getServerMoneyAvailable(target))} / ${ns.formatNumber(ns.getServerMaxMoney(target))}`,1);
+      logger.warn(`(${CURRENT_SERVER}) -- no HACK algorithm found for ${TARGET_HOSTNAME}, returning to prep`);
+      logger.info(`Security: ${ns.getServerSecurityLevel(target)} /  ${ns.getServerMinSecurityLevel(target)}`,1);
+      logger.info(`Money: ${ns.formatNumber(ns.getServerMoneyAvailable(target))} / ${ns.formatNumber(ns.getServerMaxMoney(target))}`,1);
       return false;
     }
 
@@ -195,21 +202,21 @@ export async function main(ns: NS) {
 
       const processId = await ns.exec(plan[i].script, CURRENT_SERVER, plan[i].threads, ...plan[i].args);
       if (processId == 0) {
-        logger.log(`ERROR: ns.exec(${plan[i].script}, ${CURRENT_SERVER}, ${plan[i].threads}, ${plan[i].args.join(', ')} failed)`);
+        logger.error(`ns.exec(${plan[i].script}, ${CURRENT_SERVER}, ${plan[i].threads}, ${plan[i].args.join(', ')} failed)`);
         return false;
       } else {
         hackPids.add(processId);
         const executeTime = plan[i].runTime + Number(plan[i].args[1]);
         const strExecuteTime = formatTime(executeTime);
 
-        logger.log(`${plan[i].script} (${plan[i].threads}) with args ${plan[i].args} will execute in ${strExecuteTime}`, 1);
+        logger.info(`${plan[i].script} (${plan[i].threads}) with args ${plan[i].args} will execute in ${strExecuteTime}`, 1);
       }       
     }
 
     // watch our PORT for any reporting workers. when they report, aggregate their
     // data and remove them from the pid set. Once the pid set is empty, we know
     // all our workers are done
-    logger.log(`Watching port ${PORT} and waiting for workers to finish..`);
+    logger.info(`Watching port ${PORT} and waiting for workers to finish..`);
     let scriptsRunning = true;
     let counter: number = 0;
     while (scriptsRunning) {
@@ -217,19 +224,19 @@ export async function main(ns: NS) {
         // we have data! parse the JSON and assume it's one of our worker types
         const data: Worker = JSON.parse(await handler.read());
         if (hackPids.has(data.pid)) {
-          logger.log(`Worker ${data.script} (${data.pid}) reported!`,1)
+          logger.info(`Worker ${data.script} (${data.pid}) reported!`,1)
           switch (data.script) {
             case `hack.ts`:
-              logger.log(`HACK stole ${ns.formatNumber(data.value)}`,2);
+              logger.info(`HACK stole ${ns.formatNumber(data.value)}`,2);
               break;
             case `grow.ts`:
-              logger.log(`GROW ${ns.formatNumber(data.value)}, putting money at ${ns.getServerMoneyAvailable(TARGET_HOSTNAME)} / ${maxMoney}`,2)
+              logger.info(`GROW ${ns.formatNumber(data.value)}, putting money at ${ns.getServerMoneyAvailable(TARGET_HOSTNAME)} / ${maxMoney}`,2)
               break;
             case `weaken.ts`:
-              logger.log(`WEAKEN ${data.value}, putting security at ${ns.getServerSecurityLevel(TARGET_HOSTNAME)} / ${minSecurity}`,2);
+              logger.info(`WEAKEN ${data.value}, putting security at ${ns.getServerSecurityLevel(TARGET_HOSTNAME)} / ${minSecurity}`,2);
               break;
             default:
-              logger.log(`UNKNOWN data: ${data.pid}, ${data.script}, ${data.value}`,2);
+              logger.info(`UNKNOWN data: ${data.pid}, ${data.script}, ${data.value}`,2);
               break;
           }
 
@@ -252,15 +259,15 @@ export async function main(ns: NS) {
       if (counter >= (1000 * 60)) {
         counter = 0;
         const pidsString = Array.from(hackPids).join(', ');
-        logger.log(`Waiting on PIDS: ${pidsString}`);
+        logger.info(`Waiting on PIDS: ${pidsString}`);
       }
     }
 
     const usedRamPercent = ((ns.getServerUsedRam(CURRENT_SERVER) / ns.getServerMaxRam(CURRENT_SERVER))*100);
-    logger.log(`Done waiting! Server is using ${usedRamPercent}% RAM`, 1);
+    logger.info(`Done waiting! Server is using ${usedRamPercent}% RAM`, 1);
 
-    logger.log(`---------------------------------`);
-    logger.log("");
+    logger.info(`---------------------------------`);
+    logger.info("");
 
     return true;
   }

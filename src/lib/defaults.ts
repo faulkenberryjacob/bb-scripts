@@ -13,6 +13,14 @@ export function getPurchasedServerNames(ns: NS) {
   return generatedServerNames;
 }
 
+export function hasFormulas(ns: NS) {
+  return ns.fileExists(`Formulas.exe`, `home`);
+}
+
+export function hasSingularity(ns: NS) {
+  return ns.singularity !== undefined;
+}
+
 export function canCrackSSH(ns: NS) {
   return ns.fileExists("BruteSSH.exe", "home");
 }

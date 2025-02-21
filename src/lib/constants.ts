@@ -1,3 +1,8 @@
+// numbers for when im lazy
+const MIL = 1000000;
+const BIL = 1000000000;
+const TRIL = 1000000000000;
+
 export const SERVER_PURCHASE_NAME = "host";
 export const SERVER_PURCHASE_RAM = 32;
 
@@ -22,4 +27,10 @@ export const DB_FILE = "server-database.json";
 export const MONEY_THRESHOLD = 0.70;
 export const SECURITY_THRESHOLD = 1.20;
 export const HOME_RAM_BUFFER = 24;
-export const MONEY_BUFFER = 1000000; // 1 million
+export const MONEY_BUFFER = 100 * MIL;
+
+export const GANG_MEMBER_NAME = "johnny";
+export const GANG_WANTED_THRESHOLD = 0.80; // % Wanted Level Penalty. The higher the number the less of a penalty
+export const GANG_ASCENSION_MULT_THRESHOLD = 2.0;
+
+export const CONFIG = "config/config.json";
