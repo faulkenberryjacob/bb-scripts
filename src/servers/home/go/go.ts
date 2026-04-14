@@ -20,50 +20,55 @@
 */
 
 import { Move, GoOpponent, BoardSize, AdjacentNodes } from '@/lib/types';
+import { go_starter } from './go-starter';
+import { Logger } from '@/lib/logger';
 import { RunningScript } from 'NetscriptDefinitions';
 
 const DEAD: string = "#";
 
 export async function main(ns: NS) {
+  const logger = new Logger(ns);
+  ns.disableLog("ALL");
   let wins = 0;
   let losses = 0;
-  debugger;
 
   // Check arguments
   if (ns.args.length < 2) {
-    ns.tprint(`ERROR - pass in args! run go.ts [opponent] [boardSize]`);
+    logger.error(`ERROR - pass in args! run go.ts [opponent] [boardSize]`);
     return;
   }
   const opp: GoOpponent = ns.args[0].toString() as GoOpponent;
   const size: BoardSize = Number(ns.args[1]) as BoardSize;
 
   // Kill any current running scripts
-  await killDuplicateScripts();
+   killDuplicateScripts();
 
-  ns.tprint(`Starting go.ts`);
+  logger.info(`Starting go.ts`);
   
   while (true) {
     // Create a new game with the given arguments
     ns.go.resetBoardState(opp, size);
     let inProgress = true;
-    const opponent = await ns.go.getOpponent();
-    ns.print(`Starting GO with ${opponent}`);
+    const opponent =  ns.go.getOpponent();
+    logger.info(`Starting GO with ${opponent}`);
 
     while (inProgress) {
+      await go_starter(ns);
+
       // check for best move in main logic
-      await determineBestMove();
+      // determineBestMove();
 
       // check if game is over
       inProgress = ns.go.getCurrentPlayer() != "None";
     }
 
-    ns.print(`GAME OVER!`)
+    logger.info(`GAME OVER!`)
 
     // Record wins v. losses
     const gameState = ns.go.getGameState();
     if (gameState.blackScore > gameState.whiteScore) { wins++; } 
     else { losses++; }
-    ns.tprint(`WINS ${wins} / ${losses} LOSSES -- RATE: ${(wins/(wins+losses))*100} %`)
+    logger.info(`WINS ${wins} / ${losses} LOSSES -- RATE: ${(wins/(wins+losses))*100} %`)
 
     
   }
@@ -75,15 +80,15 @@ export async function main(ns: NS) {
 // ----------------------------------------- FUNCTION DEFINITIONS ----------------------------------------------------------------
 //--------------------------------------------------------------------------------------------------------------------------------
 
-  async function killDuplicateScripts(): Promise<void> {
+   function killDuplicateScripts(): void {
     const currentScript = ns.getRunningScript() as RunningScript;
     const server = ns.getHostname();
 
-    ns.tprint(`Killing duplicate [${currentScript.filename}] script..`);
+    logger.debug(`Killing duplicate [${currentScript.filename}] script..`);
     const runningProcesses = ns.ps(ns.getHostname());
     for (const process of runningProcesses) {
       if (process.filename === currentScript.filename && process.pid !== currentScript.pid) {
-        ns.tprint(`Killing ${process.filename} with pid ${process.pid}`, 1);
+        logger.debug(`Killing ${process.filename} with pid ${process.pid}`, 1);
         ns.kill(process.filename, server, process.pid);
       }
     }
@@ -94,16 +99,16 @@ export async function main(ns: NS) {
    * Retrieves the valid moves on a Go board.
    * A move is considered valid if it is an open node (.) and not surrounded by enemy or dead spaces.
    * 
-   * @returns {Promise<boolean[][]>} - A 2D array representing the valid moves on the board.
+   * @returns {boolean[][]} - A 2D array representing the valid moves on the board.
    */
-  async function getValidMoves(): Promise<boolean[][]> {
+   function getValidMoves(): boolean[][] {
     const board = ns.go.getBoardState();
     const size  = board[0].length;
 
     const validMoves: boolean[][] = [];
-    const enemy: string = await getOpponentSymbol();
+    const enemy: string =  getOpponentSymbol();
     if (enemy == "") {
-      ns.tprint("ERROR - Current player is None. Is there a Go game started?");
+      logger.error("ERROR - Current player is None. Is there a Go game started?");
       const empty: boolean[][] = [];
       return empty;
     }
@@ -146,17 +151,17 @@ export async function main(ns: NS) {
   /**
    * Retrieves the symbol of the opponent player in a Go game.
    * 
-   * @returns {Promise<string>} - A promise that resolves to the opponent's symbol ("X" for White, "O" for Black), or an empty string if the current player is None.
+   * @returns {string} - A promise that resolves to the opponent's symbol ("X" for White, "O" for Black), or an empty string if the current player is None.
    */
-  async function getOpponentSymbol(): Promise<string> {
+   function getOpponentSymbol(): string {
     const player = ns.go.getCurrentPlayer();
     if (player == "White")      { return "X"; }
     else if (player == "Black") { return "O"; }
     else { return ""; }
   }
 
-  async function checkForNewBoard() {
-    ns.print(`Checking if board is empty..`);
+   function checkForNewBoard() {
+    logger.debug(`Checking if board is empty..`);
     const state = ns.go.getBoardState();
     let isEmpty = true;
     const size = state[0].length;
@@ -168,7 +173,7 @@ export async function main(ns: NS) {
         }
       }
     }
-    ns.print(`\tReturning ${isEmpty}`);
+    logger.debug(`\tReturning ${isEmpty}`);
     return isEmpty;
   }
 
@@ -177,9 +182,9 @@ export async function main(ns: NS) {
    * 
    * @param {number} x - The x-coordinate of the position.
    * @param {number} y - The y-coordinate of the position.
-   * @returns {Promise<AdjacentNodes>} - An object containing the values of the adjacent nodes (north, east, south, and west).
+   * @returns {AdjacentNodes} - An object containing the values of the adjacent nodes (north, east, south, and west).
    */
-  async function getAdjacentNodes(x: number, y: number): Promise<AdjacentNodes>  {
+   function getAdjacentNodes(x: number, y: number): AdjacentNodes  {
     const board = ns.go.getBoardState();
     const tempNorth = board[x]?.[y+1] ? board[x][y+1] : undefined;
     const tempEast  = board[x+1]?.[y] ? board[x+1][y] : undefined;
@@ -194,9 +199,9 @@ export async function main(ns: NS) {
     return adjacents;
   }
 
-  async function determineBestMove(): Promise<void> {
-    const [x, y] = await move_PlaceRandomNode();
-    await ns.go.makeMove(x, y);
+   function determineBestMove(): void {
+    const [x, y] =  move_PlaceRandomNode();
+     ns.go.makeMove(x, y);
 
   }
 
@@ -206,12 +211,12 @@ export async function main(ns: NS) {
    * If no such spot is found, it chooses from all available valid moves.
    * If no valid moves are found, it passes the turn.
    * 
-   * @returns {Promise<Move>} - The move made by placing a node or passing the turn.
+   * @returns {Move} - The move made by placing a node or passing the turn.
    */
-  async function move_PlaceRandomNode() : Promise<[number, number] | undefined> {
-    ns.print(`Placing random node..`);
+   function move_PlaceRandomNode() : [number, number] | undefined {
+    logger.debug(`Placing random node..`);
     const moveOptions = [];
-    const validMoves = await getValidMoves();
+    const validMoves =  getValidMoves();
     const length = validMoves[0].length;
 
     for (let x = 0; x < length; x++) {
@@ -239,12 +244,12 @@ export async function main(ns: NS) {
       }
     }
 
-    ns.print(`\tFound ${moveOptions.length} move options.`);
+    logger.debug(`\tFound ${moveOptions.length} move options.`);
     
     // if we end up not finding anything, just place a node in the next available spot
     if (moveOptions && moveOptions.length > 0) {
       const randIndex = Math.floor(Math.random() * moveOptions.length);
-      ns.print(`\tmove_PlaceRandomNode chose: ${moveOptions[randIndex]}`);
+      logger.debug(`\tmove_PlaceRandomNode chose: ${moveOptions[randIndex]}`);
       return [moveOptions[randIndex][0], moveOptions[randIndex][1]];
     } else {
       return undefined;
@@ -252,10 +257,10 @@ export async function main(ns: NS) {
     
   }
 
-  async function move_NetExpansion() {
+   function move_NetExpansion() {
     const board: string[]         = ns.go.getBoardState();
     const size: number            = board[0].length;
-    const validMoves: boolean[][] = await getValidMoves();
+    const validMoves: boolean[][] =  getValidMoves();
     const moveOptions = [];
 
     const friendly: string = ns.go.getCurrentPlayer() === "White" ? "O" : "X";
@@ -265,7 +270,7 @@ export async function main(ns: NS) {
 
         // If the empty point is a valid move, and
         if (validMoves[x][y]) {
-          const nodes: AdjacentNodes = await getAdjacentNodes(x, y);
+          const nodes: AdjacentNodes =  getAdjacentNodes(x, y);
           
           // If the point is not an open space reserved to protect the network [see getRandomMove()], and
 
@@ -285,10 +290,10 @@ export async function main(ns: NS) {
 
   }
 
-  async function move_CaptureNetwork() {
+   function move_CaptureNetwork() {
     const board: string[]         = ns.go.getBoardState();
     const size: number            = board[0].length;
-    const validMoves: boolean[][] = await getValidMoves();
+    const validMoves: boolean[][] =  getValidMoves();
     const moveOptions = [];
 
     for (let x = 0; x < size; x++) {

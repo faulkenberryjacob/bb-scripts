@@ -14,9 +14,11 @@ export async function main(ns: NS) {
 
   const envelope: Worker = {
     pid: ns.pid,
-    script: `grow.ts`,
+    host: ns.getHostname(),
+    script: ns.getScriptName(),
     value: growAmount
   };
+  ns.print(`${ns.getScriptName()} finished, writing to port: ${JSON.stringify(envelope)}`);
   const jsonEnvelope = JSON.stringify(envelope);
   ns.tryWritePort(PORT, jsonEnvelope);
 }

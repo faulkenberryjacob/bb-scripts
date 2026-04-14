@@ -1,20 +1,36 @@
+import { DEFAULT_LOG_LEVEL } from '@/lib/constants';
+import { LogLevel } from './types';
+
+export enum Colors {
+  Red =      "\u001b[31m",
+  Green =    "\u001b[32m",
+  Yellow =   "\u001b[33m",
+  Blue =     "\u001b[34m",
+  Cyan =     "\u001b[36m",
+  Magenta =  "\u001b[35m", 
+  None =     ""
+}
+
 /**
  * Logger class to handle logging messages with timestamps, caller information, and optional indentation.
  */
 export class Logger {
   private ns: NS;
   private isHome: boolean;
+  private logLevel: LogLevel;
 
-  constructor(ns: NS) {
+  constructor(ns: NS, level: LogLevel = DEFAULT_LOG_LEVEL) {
     this.ns = ns;
     this.isHome = this.ns.getHostname() === "home";
+    this.logLevel = level;
   }
 
-  info(message: string, indent: number = 0, terminal: boolean = false): void {
+  info(message: string, indent: number = 0, color: Colors = Colors.None, terminal: boolean = false): void {
+    if (this.logLevel < LogLevel.INFO) return;
     const callerInfo = Logger.getCallerInfo();
     let indentation: string = "";
     for (let i = 0; i < indent; i++) { indentation += "  "; }
-    const formMessage = `[${Logger.getTimestampFormat()}] ${callerInfo} INFO: ${indentation}${message}`;
+    const formMessage = `[${Logger.getTimestampFormat()}] ${callerInfo} INFO: ${color}${indentation}${message}${color == Colors.None ? "" : `\u001b[0m`}`;
     this.ns.print(formMessage);
     if (terminal) this.ns.tprint(formMessage);
   }
@@ -25,6 +41,7 @@ export class Logger {
    * @param {number} [indent=0] - The number of indentation levels to apply.
    */
   warn(message: string, indent: number = 0, terminal: boolean = false): void {
+    if (this.logLevel < LogLevel.WARN) return;
     const callerInfo = Logger.getCallerDebug();
     let indentation: string = "";
     for (let i = 0; i < indent; i++) { indentation += "  "; }
@@ -38,13 +55,14 @@ export class Logger {
    * @param {string} message - The message to log.
    * @param {number} [indent=0] - The number of indentation levels to apply.
    */
-  error(message: string, indent: number = 0): void {
+  error(message: string, indent: number = 0, terminal: boolean = false): void {
+    if (this.logLevel < LogLevel.ERROR) return;
     const callerInfo = Logger.getCallerDebug();
     let indentation: string = "";
     for (let i = 0; i < indent; i++) { indentation += "  "; }
     const formMessage = `[${Logger.getTimestampFormat()}] ${callerInfo} ERROR: ${indentation}${message}`;
     this.ns.print(formMessage);
-    this.ns.tprint(formMessage);
+    if (terminal) this.ns.tprint(formMessage);
   }
 
   /**
@@ -53,6 +71,7 @@ export class Logger {
    * @param {number} [indent=0] - The number of indentation levels to apply.
    */
   debug(message: string, indent: number = 0, terminal: boolean = false): void {
+    if (this.logLevel < LogLevel.DEBUG) return;
     const callerInfo = Logger.getCallerDebug();
     let indentation: string = "";
     for (let i = 0; i < indent; i++) { indentation += "  "; }
@@ -67,11 +86,7 @@ export class Logger {
    * @param {number} [indent=0] - The number of indentation levels to apply.
    */
   log(message: string, indent: number = 0): void {
-    const callerInfo = Logger.getCallerDebug();
-    let indentation: string = "";
-    for (let i = 0; i < indent; i++) { indentation += "  "; }
-    const formMessage = `[${Logger.getTimestampFormat()}] ${callerInfo}: ${indentation}${message}`;
-    this.ns.print(formMessage);
+    this.info(message, indent);
   }
 
   /**
@@ -80,12 +95,7 @@ export class Logger {
    * @param {number} [indent=0] - The number of indentation levels to apply.
    */
   tlog(message: string, indent: number = 0): void {
-    const callerInfo = Logger.getCallerDebug();
-        let indentation: string = "";
-    for (let i = 0; i < indent; i++) { indentation += "  "; }
-    const formMessage = `[${Logger.getTimestampFormat()}] ${callerInfo}: ${indentation}${message}`;
-    this.ns.print(formMessage);
-    this.ns.tprint(formMessage);
+    this.info(message, indent, undefined, true);
   }
 
   private static getCustomDate(): string {

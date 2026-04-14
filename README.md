@@ -62,7 +62,7 @@ Simply create a new folder with the name of the server you want to develop on in
 You can enable mirroring like this  
 
 ```js
-const createContext = async () => await context({
+const createContext =  () =>  context({
   entryPoints: [
     'servers/**/*.js',
     'servers/**/*.jsx',
@@ -84,7 +84,7 @@ const createContext = async () => await context({
   logLevel: 'info'
 });
 
-let ctx = await createContext();
+let ctx =  createContext();
 ctx.watch();
 ```
 
@@ -96,7 +96,7 @@ While mirroring, all changes in the game will be synced with your editor and vic
 You can specify folders with a list of servers to automatically distribute your files to these servers like this:
 
 ```js
-const createContext = async () => await context({
+const createContext =  () =>  context({
   entryPoints: [
     'servers/**/*.js',
     'servers/**/*.jsx',
@@ -118,7 +118,7 @@ const createContext = async () => await context({
   logLevel: 'info'
 });
 
-let ctx = await createContext();
+let ctx =  createContext();
 ctx.watch();
 
 ```
@@ -144,7 +144,7 @@ const customExtension = {
   afterBuild(remoteAPI) { console.log('afterBuild'); }, //Run after build results have been uploaded into the game
 };
 
-const createContext = async () => await context({
+const createContext =  () =>  context({
   entryPoints: [
     'servers/**/*.js',
     'servers/**/*.jsx',
@@ -166,7 +166,7 @@ const createContext = async () => await context({
   logLevel: 'info'
 });
 
-let ctx = await createContext();
+let ctx =  createContext();
 ctx.watch();
 
 ```
@@ -176,7 +176,7 @@ ctx.watch();
 This tool supports remote debugging for both the Steam version and the web version running in a Chrome/Chromium browser.
 
 ```js
-const createContext = async () => await context({
+const createContext =  () =>  context({
   entryPoints: [
     'servers/**/*.js',
     'servers/**/*.jsx',
@@ -198,7 +198,7 @@ const createContext = async () => await context({
   logLevel: 'info'
 });
 
-const ctx = await createContext();
+const ctx =  createContext();
 ctx.watch();
 ```
 

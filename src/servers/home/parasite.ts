@@ -16,7 +16,7 @@ export async function main(ns: NS) {
   switch (ns.args[0]) {
     case "top":
       // automatically find max money server
-      await parasiteMoney();
+      parasiteMoney();
       break;
     case "target":
       // target a particular server
@@ -30,11 +30,11 @@ export async function main(ns: NS) {
       break;
     case "share":
       // share all other server space
-      await parasiteStarter(consts.SHARE_LOOP_SCRIPT);
+      parasiteStarter(consts.SHARE_LOOP_SCRIPT);
       break;
     case "starter":
       // do basic hacking command
-      await parasiteStarter(consts.STARTER_HACK_SCRIPT);
+      parasiteStarter(consts.STARTER_HACK_SCRIPT);
       break;
     case "auto":
       // automatically target top N servers
@@ -42,7 +42,7 @@ export async function main(ns: NS) {
       break;
     case "home":
       // run top function on our home server
-      await parasiteMoney(true);
+      parasiteMoney(true);
       break;
     default:
       const help: string = "parasite [OPTIONS]"
@@ -55,39 +55,39 @@ export async function main(ns: NS) {
       ns.tprint(help);
       break;
   }
-  return; 
+  return;
 
-// ----------------------------------------------------------------------------------------------------------------------
-// --- FUNCTION DEFINITIONS ---------------------------------------------------------------------------------------------
-// ----------------------------------------------------------------------------------------------------------------------
+  // ----------------------------------------------------------------------------------------------------------------------
+  // --- FUNCTION DEFINITIONS ---------------------------------------------------------------------------------------------
+  // ----------------------------------------------------------------------------------------------------------------------
 
   /**
    * Automates the process of preparing and hacking servers by rooting all servers, building a server database, 
    * targeting the top servers, purchasing servers if needed, and deploying controller scripts.
-   * @returns {Promise<number>} - Returns 0 upon successful execution.
+   * @returns {number} - Returns 0 upon successful execution.
    */
   async function parasiteAuto() {
     // Recurse through and try to root all possible servers
-    await rootServers(ns);
+    rootServers(ns);
 
     // Now let's build the JSON DB of all server information
     // (this is just in case it hasn't been done yet)
-    await buildServerDB(ns);
+    buildServerDB(ns);
 
     // get top servers by top money hacked per second * hackChance
-    const topServers = await getTopServerByMoneyPerSecond(ns);
+    const topServers = getTopServerByMoneyPerSecond(ns);
 
-    logger.info(`Targeting top servers (${topServers.length}): ${topServers.join(', ')}`, 0, true);
+    logger.info(`Targeting top servers (${topServers.length}): ${topServers.join(', ')}`);
 
-    const successfulSpinUp: boolean = await spinUpServers(topServers.length);
+    const successfulSpinUp: boolean = spinUpServers(topServers.length);
     if (!successfulSpinUp) {
-      logger.warn("Unable to get desired server amount. Have " + ns.getPurchasedServers().length.toString() + "/" + topServers.length.toString(), 1, true);
+      logger.warn("Unable to get desired server amount. Have " + ns.getPurchasedServers().length.toString() + "/" + topServers.length.toString(), 1);
     } else {
       logger.info("We have enough servers! (" + ns.getPurchasedServers().length.toString() + ")", 1, true);
     }
 
-    const filesToCopy: string[]    = [consts.CONTROLLER_SCRIPT, consts.WEAK_SCRIPT, consts.GROW_SCRIPT, 
-                                      consts.HACK_SCRIPT, consts.HACK_ALGO_SCRIPT, consts.CONFIG, getUtilsName()];
+    const filesToCopy: string[] = [consts.CONTROLLER_SCRIPT, consts.WEAK_SCRIPT, consts.GROW_SCRIPT,
+    consts.HACK_SCRIPT, consts.HACK_ALGO_SCRIPT, getUtilsName()];
     const argsForController: string[] = [];
 
     // assume this is trying to fill up ALL purchased servers
@@ -104,30 +104,31 @@ export async function main(ns: NS) {
 
   /**
    * Initializes the parasite scripts by rooting all possible servers, building the server database, and deploying the starter hack script to all hackable servers.
-   * @returns {Promise<number>} - Returns 0 upon successful execution.
+   * @returns {number} - Returns 0 upon successful execution.
    */
-  async function parasiteStarter(script: string) {
+  function parasiteStarter(script: string) {
     // Recurse through and try to root all possible servers
-    await rootServers(ns);
+    rootServers(ns);
 
     // Now let's build the JSON DB of all server information
     // (this is just in case it hasn't been done yet)
-    await buildServerDB(ns);
+    buildServerDB(ns);
 
     // What are all the servers we can hack?
-    const hackableServers: string[] = await getHackableServers(ns);
+    const hackableServers: string[] = getHackableServers(ns);
 
     // scp and kickoff starter script
     for (const server of hackableServers) {
       if (server != "home") {
-        const idealThreads: number = await calculateMaxThreadsForScript(ns, script, server);
-        if (idealThreads <= 0 ) {
+        ns.killall(server);
+        deleteAllFilesOnServer(ns, server);
+        const idealThreads: number = calculateMaxThreadsForScript(ns, script, server);
+        if (idealThreads <= 0) {
           logger.info(`No available threads on ${server}, skipping..`);
           continue;
         }
-        ns.killall(server);
-        await deleteAllFilesOnServer(ns, server);
         ns.scp(script, server);
+        logger.debug(`Starting ${script} on ${server} with ${idealThreads} threads..`, 1);
         ns.exec(script, server, idealThreads, server);
       }
     }
@@ -138,25 +139,25 @@ export async function main(ns: NS) {
   /**
    * Attempts to gain access to the target server and deploys a script if successful.
    * @param {string} host - The hostname of the target server.
-   * @returns {Promise<number>} - Returns 0 if successful, otherwise returns 2.
+   * @returns {number} - Returns 0 if successful, otherwise returns 2.
    */
-  async function parasiteHome(host: string) {
-    const target = await getServerData(ns, host);
+  function parasiteHome(host: string) {
+    const target = getServerData(ns, host);
     if (!target) {
       logger.error(host + " is not found in serverDB!", 1);
       return 2;
     }
     logger.info(host + " found!", 1, true);
 
-    if (!(await rootServer(ns, target.hostname))) {
+    if (!(rootServer(ns, target.hostname))) {
       logger.warn("Server is not scriptable, aborting.", 1, true);
       return 2;
     }
     logger.info(host + " is scriptable!", 1, true);
 
     if (ns.exec(consts.CONTROLLER_SCRIPT, "home", 1, host) == 0) {
-        logger.error("Could not start " + consts.CONTROLLER_SCRIPT + " on home", 3);
-        return 2;
+      logger.error("Could not start " + consts.CONTROLLER_SCRIPT + " on home", 3);
+      return 2;
     }
 
     return 0;
@@ -165,19 +166,19 @@ export async function main(ns: NS) {
   /**
    * Targets the server with the maximum money and either runs parasiteHome or parasiteTarget based on the onHome flag.
    * @param {boolean} [onHome=false] - Flag to determine whether to run the parasiteHome function or parasiteTarget function.
-   * @returns {Promise<number>} - Returns the result of parasiteHome or parasiteTarget function.
+   * @returns {number} - Returns the result of parasiteHome or parasiteTarget function.
    */
-  async function parasiteMoney(onHome: boolean = false) {
-    const topServers: string[] = await getTopServerByMoneyPerSecond(ns);
+  function parasiteMoney(onHome: boolean = false) {
+    const topServers: string[] = getTopServerByMoneyPerSecond(ns);
     const bigMoneyTarget: string = topServers.length > 0 ? topServers[0] : "";
     if (!bigMoneyTarget || bigMoneyTarget == "") {
       logger.warn("No servers found!", 1, true);
       return 2;
     }
     if (onHome) {
-      return await parasiteHome(bigMoneyTarget);
+      return parasiteHome(bigMoneyTarget);
     } else {
-      return await parasiteTarget(bigMoneyTarget);
+      return parasiteTarget(bigMoneyTarget);
     }
   }
 
@@ -185,17 +186,17 @@ export async function main(ns: NS) {
   /**
    * Targets a specific server by rooting it, ensuring enough servers are available, and deploying controller scripts.
    * @param {string} host - The hostname of the target server.
-   * @returns {Promise<number>} - Returns 0 if successful, otherwise returns 2.
+   * @returns {number} - Returns 0 if successful, otherwise returns 2.
    */
   async function parasiteTarget(host: string) {
-    const target = await getServerData(ns, host);
+    const target = getServerData(ns, host);
     if (!target) {
       logger.warn(host + " is not found in serverDB!", 1, true);
       return 2;
     }
     logger.info(host + " found!", 1, true);
 
-    if (!(await rootServer(ns, target.hostname))) {
+    if (!(rootServer(ns, target.hostname))) {
       logger.warn("Server is not scriptable, aborting.", 1, true);
       return 2;
     }
@@ -203,15 +204,15 @@ export async function main(ns: NS) {
 
     const desiredServerAmount: number = 1;
 
-    if (!await spinUpServers(desiredServerAmount)) {
+    if (!spinUpServers(desiredServerAmount)) {
       logger.warn("Unable to get desired server amount. Have " + ns.getPurchasedServers().length.toString() + "/" + desiredServerAmount.toString(), 1);
     } else {
       logger.info("We have enough servers! (" + ns.getPurchasedServers().length.toString() + ")", 1, true);
     }
 
-    const targetArray: string[]    = [target.hostname];
-    const filesToCopy: string[]    = [consts.CONTROLLER_SCRIPT, consts.WEAK_SCRIPT, consts.GROW_SCRIPT, 
-                                      consts.HACK_SCRIPT, consts.HACK_ALGO_SCRIPT, consts.CONFIG, await getUtilsName()];
+    const targetArray: string[] = [target.hostname];
+    const filesToCopy: string[] = [consts.CONTROLLER_SCRIPT, consts.WEAK_SCRIPT, consts.GROW_SCRIPT,
+    consts.HACK_SCRIPT, consts.HACK_ALGO_SCRIPT, getUtilsName()];
     const argsForController: string[] = [];
 
     // assume this is trying to fill up ALL purchased servers
@@ -230,9 +231,9 @@ export async function main(ns: NS) {
   /**
    * Purchases and sets up the specified number of servers, ensuring the total does not exceed the server limit.
    * @param {number} serverAmount - The desired number of servers to spin up.
-   * @returns {Promise<boolean>} - Returns true if the desired number of servers are successfully purchased and set up, otherwise returns false.
+   * @returns {boolean} - Returns true if the desired number of servers are successfully purchased and set up, otherwise returns false.
    */
-  async function spinUpServers(serverAmount: number) {
+  function spinUpServers(serverAmount: number) {
     // Check if we have as many servers as can hack
     let purchasedServers = ns.getPurchasedServers().sort();
     const serverLimit = ns.getPurchasedServerLimit();
@@ -267,18 +268,18 @@ export async function main(ns: NS) {
    * @param {string[]} filesToCopy - The list of files to copy to each server.
    * @param {string[]} argsForController - The arguments to pass to the controller script.
    * @param {boolean} [fillServers=true] - Whether to fill all purchased servers or only use the number of targets.
-   * @returns {Promise<Set<string>>} - A set of servers where the controller script failed to start.
+   * @returns {Set<string>} - A set of servers where the controller script failed to start.
    */
   async function kickoffControllers(targets: string[], filesToCopy: string[], argsForController: string[], fillServers: boolean = false) {
     // Begin spinning up factories and copying over necessary files
-    const purchasedServers    = ns.getPurchasedServers().sort();
+    const purchasedServers = ns.getPurchasedServers().sort();
     const numPurchasedServers = purchasedServers.length;
-    const maxFactories        = targets.length > numPurchasedServers ? numPurchasedServers : targets.length;
+    const maxFactories = targets.length > numPurchasedServers ? numPurchasedServers : targets.length;
 
     const failedFactories: Set<string> = new Set();
-    
+
     const deploymentNum = fillServers ? numPurchasedServers : maxFactories;
-    
+
     for (let b = 0; b < deploymentNum; b++) {
       logger.debug(`Sending following files to ${purchasedServers[b]}: ${filesToCopy}`, 2)
       const distribute: number = b % targets.length;
@@ -320,7 +321,7 @@ export async function main(ns: NS) {
     }
 
     // check for already-purchased hostnames and upscale
-    if (purchasedServers.includes(name)) { 
+    if (purchasedServers.includes(name)) {
       if (ns.getServerMaxRam(name) < ram) {
         logger.info(`${name} already exists with less RAM. Upgrading to ${ram} RAM`, 2, true);
         ns.killall(name);

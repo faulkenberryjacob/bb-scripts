@@ -9,7 +9,7 @@ import { printHackAlgorithm, printPrepAlgorithm } from '@/lib/hack-algorithm';
 
 const SCRIPT_NAME: string = 'utils.ts';
 
-export async function main(ns: NS) {
+export  function main(ns: NS) {
   const rawArg = ns.args[0];
   //const logger = new Logger(ns);
 
@@ -23,24 +23,24 @@ export async function main(ns: NS) {
 
   switch (funcName) {
     case "buildserverdb":
-      await buildServerDB(ns);
+       buildServerDB(ns);
       break;
     case "printserverdata":
-      await printServerData(ns, ns.args[1].toString());
+       printServerData(ns, ns.args[1].toString());
       break;
     case "maxram":
       ns.tprint(`Max ram you can purchase per server:  ${determinePurchaseServerMaxRam(ns)}`);
       break;
     case "getserverpaths":
       ns.tprint(`Getting server paths from home`);
-      await getServerPaths(ns);
+       getServerPaths(ns);
       break;
     case "top":
       ns.tprint(`Showing top ${ns.getPurchasedServerLimit()} servers:`);
-      await showTopServers(ns);
+       showTopServers(ns);
       break;
     case "killall":
-      ns.tprint("Killing all scripts on servers");
+      ns.tprint("Kill all scripts on servers");
       killAll(ns);
       break;
     case "dryrun":
@@ -49,17 +49,17 @@ export async function main(ns: NS) {
         const host: string = ns.args[2].toString();
 
         ns.tprint(`Prep algorithm for ${target} on ${host}`);
-        await printPrepAlgorithm(ns, target, host);
+         printPrepAlgorithm(ns, target, host);
 
         ns.tprint(`Hack algorithm for ${target} on ${host}`);
-        await printHackAlgorithm(ns, target, host);
+         printHackAlgorithm(ns, target, host);
       } else {
         ns.tprint(`Usage: utils.js dryrun [target] [host]`);
       }
       break;
     case "reptodonate":
       if (ns.args[1]) {
-        await determineFactionFavorGained(ns, ns.args[1].toString());
+         determineFactionFavorGained(ns, ns.args[1].toString());
       } else {
         ns.tprint(`Usage: utils.js repToDonate [faction]`);
       }
@@ -99,14 +99,14 @@ export function getUtilsName() {
  * Prints the data of a specified server from the database.
  * @param {NS} ns - The Netscript context.
  * @param {string} target - The hostname of the server to print data for.
- * @returns {Promise<void>}
+ * @returns {void}
  */
-export async function printServerData(ns: NS, target: string) {
+export  function printServerData(ns: NS, target: string) {
   const logger = new Logger(ns);
-  const db: Server[] = await readDB(ns);
+  const db: Server[] =  readDB(ns);
   const foundServer = db.find(server => server.hostname === target);
 
-  if (foundServer) { logger.info(JSON.stringify(foundServer, null, 2), 0, true); }
+  if (foundServer) { logger.info(JSON.stringify(foundServer, null, 2), 0, undefined, true); }
   else { logger.warn("Server not found.", 0, true); }
 }
 
@@ -115,15 +115,12 @@ export async function printServerData(ns: NS, target: string) {
  *
  * @param ns - The Netscript object provided by Bitburner.
  */
-export async function killAll(ns: NS) {
-  const db = await readDB(ns);
-
-  for (const ownedServer of ns.getPurchasedServers()) {
-    db.push(ns.getServer(ownedServer));
-  }
+export  function killAll(ns: NS) {
+  const db =  readDB(ns);
 
   for (const server of db) {
-    if (server.hostname != "home") { ns.killall(server.hostname); }
+    //if (server.hostname != "home") { ns.killall(server.hostname); }
+    ns.killall(server.hostname);
   }
 }
 
@@ -137,8 +134,8 @@ export async function killAll(ns: NS) {
  * @param ns - The Netscript object providing access to game functions.
  * @returns A promise that resolves when the function completes.
  */
-export async function showTopServers(ns: NS) {
-  const topServers = await getTopServerByMoneyPerSecond(ns);
+export  function showTopServers(ns: NS) {
+  const topServers =  getTopServerByMoneyPerSecond(ns);
   const purchasedServerLimit = ns.getPurchasedServerLimit();
   const ceiling = Math.min(topServers.length, purchasedServerLimit);
   for (let i = 0; i < ceiling; i++) {
@@ -167,7 +164,7 @@ export async function showTopServers(ns: NS) {
  * If the server is "home", the function will log a message and abort without deleting any files.
  * The function logs the deletion process and any failures encountered.
  */
-export async function removeFilesFromServer(ns: NS, files: string[], server: string) {
+export  function removeFilesFromServer(ns: NS, files: string[], server: string) {
   const logger = new Logger(ns);
   if (server == "home") {
     logger.warn("We're not deleting files off home. Aborting");
@@ -195,11 +192,11 @@ export async function removeFilesFromServer(ns: NS, files: string[], server: str
  * @param {NS} ns - The Netscript context.
  * @param {string} server - The hostname of the server to delete files from.
  * @param {string} [fileExtension] - The file extension to filter by (optional).
- * @returns {Promise<number>} - Returns 2 if aborting deletion on "home", otherwise returns 0.
+ * @returns {number} - Returns 2 if aborting deletion on "home", otherwise returns 0.
  */
-export async function deleteAllFilesOnServer(ns: NS, server: string, fileExtension?: string) {
+export  function deleteAllFilesOnServer(ns: NS, server: string, fileExtension?: string) {
   const logger = new Logger(ns);
-  if (server = "home") {
+  if (server == "home") {
     logger.warn("We're not deleting files off home. Aborting");
     return 2;
   }
@@ -224,9 +221,9 @@ export async function deleteAllFilesOnServer(ns: NS, server: string, fileExtensi
  * @param {NS} ns - The NS object.
  * @param {string[]} scripts - An array of script names to check.
  * @param {string} targetServer - The target server to check for running scripts.
- * @returns {Promise<boolean>} - True if any of the specified scripts are running, false otherwise.
+ * @returns {boolean} - True if any of the specified scripts are running, false otherwise.
  */
-export async function checkIfScriptsAlreadyRunning(ns: NS, scripts: string[], targetServer: string) {
+export  function checkIfScriptsAlreadyRunning(ns: NS, scripts: string[], targetServer: string) {
   // Get all the running scripts on the server
   const runningScripts = ns.ps(targetServer);
   let scriptsStillRunning: boolean = false;
@@ -249,9 +246,9 @@ export async function checkIfScriptsAlreadyRunning(ns: NS, scripts: string[], ta
  * @param {NS} ns - The NS object.
  * @param {string[]} scripts - An array of script names to kill.
  * @param {string} targetServer - The target server where the scripts are running.
- * @returns {Promise<boolean>} - True if all specified scripts are killed, false otherwise.
+ * @returns {boolean} - True if all specified scripts are killed, false otherwise.
  */
-export async function killScripts(ns: NS, scripts: string[], targetServer: string) {
+export  function killScripts(ns: NS, scripts: string[], targetServer: string) {
   // Get all the running scripts on the server
   const runningScripts = ns.ps(targetServer);
 
@@ -268,7 +265,7 @@ export async function killScripts(ns: NS, scripts: string[], targetServer: strin
   logger.info("Done killing scripts!", 1);
 
   // confirm scripts are all dead
-  return !await checkIfScriptsAlreadyRunning(ns, scripts, targetServer);
+  return ! checkIfScriptsAlreadyRunning(ns, scripts, targetServer);
 }
 
 /**
@@ -278,15 +275,15 @@ export async function killScripts(ns: NS, scripts: string[], targetServer: strin
  * @param {string} targetServer - The target server on which to deploy the script.
  * @param {string} sourceServer - The source server from which to copy the script.
  * @param {string[]} [args] - Optional array of arguments for the script.
- * @returns {Promise<boolean>} - True if the script is executed successfully, false otherwise.
+ * @returns {boolean} - True if the script is executed successfully, false otherwise.
  */
-export async function deployScript(ns: NS, script: string, targetServer: string, sourceServer: string, args?: string[]) {
+export  function deployScript(ns: NS, script: string, targetServer: string, sourceServer: string, args?: string[]) {
   const logger = new Logger(ns);
   
   // kill anything already running
   const scriptArray: string[] = [script];
 
-  if (!await killScripts(ns, scriptArray, targetServer)) {
+  if (! killScripts(ns, scriptArray, targetServer)) {
     logger.error("Unable to kill still-running script. Aborting.");
     return false;
   }
@@ -296,7 +293,7 @@ export async function deployScript(ns: NS, script: string, targetServer: string,
     ns.scp(scriptArray, targetServer, sourceServer);
   }
 
-  const idealThreads = await calculateMaxThreadsForScript(ns, script, targetServer, sourceServer);
+  const idealThreads =  calculateMaxThreadsForScript(ns, script, targetServer, sourceServer);
 
   if (idealThreads <= 0) {
     logger.error("Not enough RAM to run script");
@@ -325,15 +322,15 @@ export async function deployScript(ns: NS, script: string, targetServer: string,
  * @param {string} targetServer - The target server on which to deploy the script.
  * @param {string} sourceServer - The source server from which to copy the script.
  * @param {string[]} [args] - Optional array of arguments for the script.
- * @returns {Promise<boolean>} - True if the script is executed successfully, false otherwise.
+ * @returns {boolean} - True if the script is executed successfully, false otherwise.
  */
-export async function deployScriptNoOptimization(ns: NS, script: string, targetServer: string, sourceServer: string, threads: number, args?: string[]) {
+export  function deployScriptNoOptimization(ns: NS, script: string, targetServer: string, sourceServer: string, threads: number, args?: string[]) {
   const logger = new Logger(ns);
   
   // kill anything already running
   const scriptArray: string[] = [script];
 
-  if (!await killScripts(ns, scriptArray, targetServer)) {
+  if (! killScripts(ns, scriptArray, targetServer)) {
     logger.error("Unable to kill still-running script. Aborting.");
     return false;
   }
@@ -364,7 +361,7 @@ export async function deployScriptNoOptimization(ns: NS, script: string, targetS
  * @param ns - The Netscript environment object.
  * @returns An array of strings representing the names of all owned servers.
  */
-export async function getOwnedServers(ns: NS): Promise<string[]> {
+export  function getOwnedServers(ns: NS): string[] {
   const purchasedServers = ns.getPurchasedServers();
   purchasedServers.push("home");
   return purchasedServers;
@@ -375,9 +372,9 @@ export async function getOwnedServers(ns: NS): Promise<string[]> {
  * Recursively scans and roots servers starting from a given server or the "home" server by default.
  * @param {NS} ns - The Netscript context.
  * @param {string} [startServer="home"] - The hostname to start the scan from. Defaults to "home".
- * @returns {Promise<string[]>} - A promise that resolves to a list of rooted server hostnames.
+ * @returns {string[]} - A promise that resolves to a list of rooted server hostnames.
  */
-export async function rootServers(ns: NS, startServer: string = "home") {
+export  function rootServers(ns: NS, startServer: string = "home") {
   // Ongoing set of already-scanned servers
   const scannedServers = new Set();
   const logger = new Logger(ns);
@@ -385,7 +382,7 @@ export async function rootServers(ns: NS, startServer: string = "home") {
 
   logger.info(`Rooting servers..`);
 
-  await scanServer(startServer);
+   scanServer(startServer);
 
   return rootedServers;
 
@@ -393,7 +390,7 @@ export async function rootServers(ns: NS, startServer: string = "home") {
    * Recursively scans servers and performs operations on them
    * @param {string} server - The current server to scan
    */
-  async function scanServer(server: string) {
+   function scanServer(server: string) {
     // If the server has already been scanned, skip it
     if (scannedServers.has(server)) {
       return;
@@ -403,7 +400,7 @@ export async function rootServers(ns: NS, startServer: string = "home") {
 
     // Mark the server as scanned
     scannedServers.add(server);
-    const rootServerReturn = await rootServer(ns, server);
+    const rootServerReturn =  rootServer(ns, server);
     if (rootServerReturn) {
       rootedServers.push(rootServerReturn);
     }
@@ -414,7 +411,7 @@ export async function rootServers(ns: NS, startServer: string = "home") {
     // Loop through each connected server
     for (let i = 0; i < connectedServers.length; i++) {
       // Recursively scan the connected server
-      await scanServer(connectedServers[i]);
+       scanServer(connectedServers[i]);
     }
   }
 
@@ -426,11 +423,11 @@ export async function rootServers(ns: NS, startServer: string = "home") {
  * 
  * @param {NS} ns - The Netscript context.
  * @param {Server} server - The server to root.
- * @returns {Promise<string | undefined>} - Returns the server hostname if successfully rooted, otherwise undefined.
+ * @returns {string | undefined} - Returns the server hostname if successfully rooted, otherwise undefined.
  */
-export async function rootServer(ns: NS, server: string) {
+export function rootServer(ns: NS, server: string) {
   const logger = new Logger(ns);
-  const serverData: Server = await getServerData(ns, server) as Server;
+  const serverData: Server =  getServerData(ns, server) as Server;
 
   logger.info("Checking server: " + server + "...", 1);
 
@@ -449,7 +446,7 @@ export async function rootServer(ns: NS, server: string) {
   
   if (!ns.hasRootAccess(server)) {
     logger.debug("No admin rights. Cracking..", 3)
-    if (await openPorts(server)) {
+    if ( openPorts(server)) {
       ns.nuke(server);
       logger.debug(`Ports opened and nuked!`, 3);
       isScriptable = true;
@@ -462,7 +459,7 @@ export async function rootServer(ns: NS, server: string) {
   const backdoorInstalled: boolean = serverData?.backdoorInstalled ?? false;
   if (backdoorInstalled) {
     //ns.print("Installing backdoor..");
-    //await ns.singularity.installBackdoor();
+    // ns.singularity.installBackdoor();
   }
 
   if (!isScriptable) { return; }
@@ -474,7 +471,7 @@ export async function rootServer(ns: NS, server: string) {
  * @param {NS} ns - The NS object.
  * @param {Server} server - The server object to open ports on.
  */
-  async function openPorts(server: string) {
+   function openPorts(server: string) {
     logger.info("Cracking open ports..", 2);
     
 
@@ -515,16 +512,16 @@ export async function rootServer(ns: NS, server: string) {
 
 
 /**
- * Asynchronously retrieves the paths of all servers in the network and writes them to a file.
+ * hronously retrieves the paths of all servers in the network and writes them to a file.
  * 
  * This function scans all servers starting from the home server, records their paths in a file,
  * and returns a list of rooted servers. It avoids scanning the same server multiple times by 
  * keeping track of already-scanned servers.
  * 
  * @param {NS} ns - The Netscript object providing access to game functions.
- * @returns {Promise<string[]>} - A promise that resolves to an array of rooted server hostnames.
+ * @returns {string[]} - A promise that resolves to an array of rooted server hostnames.
  */
-export async function getServerPaths(ns: NS) {
+export  function getServerPaths(ns: NS) {
   // Ongoing set of already-scanned servers
   const scannedServers = new Set();
   const rootedServers: string[] = [];
@@ -533,7 +530,7 @@ export async function getServerPaths(ns: NS) {
 
   if (ns.fileExists('server-paths.txt', 'home')) { ns.rm('server-paths.txt', 'home'); }
   ns.write('server-paths.txt', ns.getServer().hostname + "\r\n", "w");
-  await scanServer(ns.getServer(), 1);
+   scanServer(ns.getServer(), 1);
 
   return rootedServers;
 
@@ -541,7 +538,7 @@ export async function getServerPaths(ns: NS) {
    * Recursively scans servers and performs operations on them
    * @param {string} server - The current server to scan
    */
-  async function scanServer(server: Server, indent: number) {
+   function scanServer(server: Server, indent: number) {
     // If the server has already been scanned, skip it
     if (scannedServers.has(server.hostname)) {
       return;
@@ -564,7 +561,7 @@ export async function getServerPaths(ns: NS) {
       const connectedServer: Server = ns.getServer(connectedServers[i]);
 
       // Recursively scan the connected server
-      await scanServer(connectedServer, indent+1);
+       scanServer(connectedServer, indent+1);
     }
   }
 
@@ -575,9 +572,9 @@ export async function getServerPaths(ns: NS) {
  * @param {NS} ns - The NS object.
  * @param {string} targetServer - The target server to check for running scripts.
  * @param {string[]} scripts - An array of script names to look for.
- * @returns {Promise<number[]>} - An array of PIDs of the specified scripts running on the target server.
+ * @returns {number[]} - An array of PIDs of the specified scripts running on the target server.
  */
-export async function getScriptPIDS(ns: NS, targetServer: string, scripts: string[]) {
+export  function getScriptPIDS(ns: NS, targetServer: string, scripts: string[]) {
   const processes = ns.ps(targetServer);
   const scriptPIDs: number[] = [];
 

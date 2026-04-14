@@ -20,7 +20,7 @@ export function formatTime(timeInMillis: number) {
 /**
  * Formats a number into a dollar amount with commas and a dollar sign.
  * @param {number} money - The amount of money to format.
- * @returns {Promise<string>} - The formatted dollar amount.
+ * @returns {string} - The formatted dollar amount.
  */
 export function formatDollar(ns: NS, money: number) {
   return `$${ns.formatNumber(money)}`;
@@ -29,9 +29,9 @@ export function formatDollar(ns: NS, money: number) {
 /**
  * Formats a given number into a short string representation with suffixes (k, m, b) for thousands, millions, and billions.
  * @param {number} num - The number to format.
- * @returns {Promise<string>} - A promise that resolves to the formatted number string.
+ * @returns {string} - A promise that resolves to the formatted number string.
  */
-export async function shortFormatNumber(num: number) {
+export  function shortFormatNumber(num: number) {
   if (num >= 1_000_000_000) {
     return (num / 1_000_000_000).toFixed(1) + 'b';
   } else if (num >= 1_000_000) {
@@ -45,8 +45,8 @@ export async function shortFormatNumber(num: number) {
 /**
  * Formats a given number into a string with commas as thousands separators.
  * @param {number} num - The number to format.
- * @returns {Promise<string>} - A promise that resolves to the formatted number string.
+ * @returns {string} - A promise that resolves to the formatted number string.
  */
-export async function formatNumber(num: number) {
+export  function formatNumber(num: number) {
   return num.toLocaleString('en-US');
 }

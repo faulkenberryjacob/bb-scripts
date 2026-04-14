@@ -11,12 +11,30 @@ import { hasFormulas } from "./defaults";
  * @param ns - The Netscript environment object.
  * @returns An array of servers sorted by money generated per second in descending order.
  */
-export async function getTopServerByMoneyPerSecond(ns: NS) {
-  const hackableServers = await getHackableServers(ns);
+export function getTopServerByMoneyPerSecond(ns: NS) {
+  const hackableServers =  getHackableServers(ns);
   const sortedServers: string[] = hackableServers
                                   .sort((a, b) => calculateMoneyPerSecond(ns, b) - calculateMoneyPerSecond(ns, a))
                                   .filter(server => calculateMoneyPerSecond(ns, server) > 0);
   return sortedServers;
+}
+
+export function roundTo(num: number, places: number) {
+  const factor = 10 ** places;
+  return Math.round(num * factor) / factor;
+}
+
+/**
+ * Generates a random integer between the specified minimum and maximum values, inclusive.
+ * 
+ * @param {number} min - The minimum value (inclusive).
+ * @param {number} max - The maximum value (inclusive).
+ * @returns {number} - A random integer between min and max.
+ */
+export function getRandomInt(min: number = 100, max: number = Number.MAX_SAFE_INTEGER): number {
+    min = Math.ceil(min);
+    max = Math.floor(max);
+    return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
 /**
@@ -24,7 +42,7 @@ export async function getTopServerByMoneyPerSecond(ns: NS) {
  * 
  * @param {NS} ns - The Netscript context.
  * @param {string} target - The hostname of the target server to analyze.
- * @returns {Promise<number>} - The potential money per second that can be earned.
+ * @returns {number} - The potential money per second that can be earned.
  */
 export function calculateMoneyPerSecond(ns: NS, target: string) {
   const maxMoney = ns.getServerMaxMoney(target);
@@ -43,9 +61,9 @@ export function calculateMoneyPerSecond(ns: NS, target: string) {
  * @param {string} script - The name of the script to run.
  * @param {string} server - The hostname of the server to run the script on.
  * @param {string} [scriptSource="home"] - The hostname of the server where the script is located. Defaults to "home".
- * @returns {Promise<number>} - The maximum number of threads that can be run.
+ * @returns {number} - The maximum number of threads that can be run.
  */
-export async function calculateMaxThreadsForScript(ns: NS, script: string, server: string, scriptSource: string = "home") {
+export  function calculateMaxThreadsForScript(ns: NS, script: string, server: string, scriptSource: string = "home") {
   const logger = new Logger(ns);
 
   // add a buffer if we're working on "home"
@@ -54,7 +72,7 @@ export async function calculateMaxThreadsForScript(ns: NS, script: string, serve
   const requiredRam: number = ns.getScriptRam(script, scriptSource);
   const availableRam: number = (ns.getServerMaxRam(server) - ns.getServerUsedRam(server)) - ramBuffer;
   const idealThreads: number = Math.floor(availableRam / requiredRam);
-  logger.log("AvailableRam (" + availableRam + ") / requiredRam (" + requiredRam + ") = " + idealThreads + " ideal threads");
+  logger.debug("AvailableRam (" + availableRam + ") / requiredRam (" + requiredRam + ") = " + idealThreads + " ideal threads");
   return idealThreads;
 }
 
@@ -64,7 +82,7 @@ export async function calculateMaxThreadsForScript(ns: NS, script: string, serve
  * @param ns - The Netscript environment object.
  * @param faction - The name of the faction for which to determine favor gained.
  */
-export async function determineFactionFavorGained(ns: NS, faction: string): Promise<void> {
+export  function determineFactionFavorGained(ns: NS, faction: string): void {
   const logger = new Logger(ns);
   const factions = ns.getPlayer().factions;
   if (!factions.includes(faction)) {
@@ -124,7 +142,7 @@ export function determinePurchaseServerMaxRam(ns: NS, numServers?: number) {
  * @param number - The number to fit.
  * @returns The lowest "n" such that 2^n is greater than or equal to the given number.
  */
-export async function findLowestPowerOfTwo(num: number): Promise<number> {
+export  function findLowestPowerOfTwo(num: number): number {
   if (num <= 0) {
       throw new Error("Number must be greater than zero");
   }
@@ -136,22 +154,22 @@ export async function findLowestPowerOfTwo(num: number): Promise<number> {
  *
  * @param {NS} ns - The Netscript environment.
  * @param {string} target - The name of the target server.
- * @returns {Promise<number>} - A promise that resolves to the minimum RAM needed for hacking the target server.
+ * @returns {number} - A promise that resolves to the minimum RAM needed for hacking the target server.
  */
-export async function determineMinimumRamNeededForHack(ns: NS, target: string) {
+export  function determineMinimumRamNeededForHack(ns: NS, target: string) {
   const logger = new Logger(ns);
   logger.info(`Determining minimum ram needed for ${target}`);
 
   return findRamUntilHack(1);
 
-  async function findRamUntilHack(ramExponent: number) {
+   function findRamUntilHack(ramExponent: number) {
     const ram = Math.pow(2, ramExponent);
-    const { plan, hackPct } = await maxHackAlgorithm(ns, target, ram);
+    const { plan, hackPct } =  maxHackAlgorithm(ns, target, ram);
     if (plan.length > 0) {
       logger.info(`Minimum ram needed for ${target} is ${ram}`, 1);
       return ram;
     } else {
-      await findRamUntilHack(ramExponent + 1);
+       findRamUntilHack(ramExponent + 1);
     }
   }
 }
@@ -161,22 +179,22 @@ export async function determineMinimumRamNeededForHack(ns: NS, target: string) {
  *
  * @param {NS} ns - The Netscript environment.
  * @param {string} target - The name of the target server.
- * @returns {Promise<number>} - A promise that resolves to the optimum RAM needed for hacking the target server.
+ * @returns {number} - A promise that resolves to the optimum RAM needed for hacking the target server.
  */
-export async function determineOptimumRamNeededForHack(ns: NS, target: string) {
+export  function determineOptimumRamNeededForHack(ns: NS, target: string) {
   const logger = new Logger(ns);
   logger.info(`Determining optimum ram needed for ${target}`);
 
   return findRamUntilHack(1);
 
-  async function findRamUntilHack(ramExponent: number) {
+   function findRamUntilHack(ramExponent: number) {
     const ram = Math.pow(2, ramExponent);
-    const { plan, hackPct } = await maxHackAlgorithm(ns, target, ram);
+    const { plan, hackPct } =  maxHackAlgorithm(ns, target, ram);
     if (hackPct == 1) {
       logger.info(`Optimum ram needed for ${target} is ${ram}`, 1);
       return ram;
     } else {
-      return await findRamUntilHack(ramExponent + 1);
+      return  findRamUntilHack(ramExponent + 1);
     }
   }
 }
@@ -186,22 +204,22 @@ export async function determineOptimumRamNeededForHack(ns: NS, target: string) {
  *
  * @param {NS} ns - The Netscript environment.
  * @param {string} target - The name of the target server.
- * @returns {Promise<number>} - A promise that resolves to the minimum RAM needed for prepping the target server.
+ * @returns {number} - A promise that resolves to the minimum RAM needed for prepping the target server.
  */
-export async function determineMinimumRamNeededForPrep(ns: NS, target: string) {
+export  function determineMinimumRamNeededForPrep(ns: NS, target: string) {
   const logger = new Logger(ns);
   logger.info(`Determining minimum ram needed for ${target}`);
 
   return findRamUntilPrep(1);
 
-  async function findRamUntilPrep(ramExponent: number) {
+   function findRamUntilPrep(ramExponent: number) {
     const ram = Math.pow(2, ramExponent);
-    const { plan, growPct } = await maxPrepAlgorithm(ns, target, ram);
+    const { plan, growPct } =  maxPrepAlgorithm(ns, target, ram);
     if (plan.length > 0) {
       logger.info(`Minimum ram needed for ${target} is ${ram}`, 1);
       return ram;
     } else {
-      await findRamUntilPrep(ramExponent + 1);
+       findRamUntilPrep(ramExponent + 1);
     }
   }
 }
@@ -211,22 +229,22 @@ export async function determineMinimumRamNeededForPrep(ns: NS, target: string) {
  *
  * @param {NS} ns - The Netscript environment.
  * @param {string} target - The name of the target server.
- * @returns {Promise<number>} - A promise that resolves to the optimum RAM needed for prepping the target server.
+ * @returns {number} - A promise that resolves to the optimum RAM needed for prepping the target server.
  */
-export async function determineOptimumRamNeededForPrep(ns: NS, target: string) {
+export  function determineOptimumRamNeededForPrep(ns: NS, target: string) {
   const logger = new Logger(ns);
   logger.info(`Determining optimum ram needed for ${target}`);
 
   return findRamUntilPrep(1);
 
-  async function findRamUntilPrep(ramExponent: number) {
+   function findRamUntilPrep(ramExponent: number) {
     const ram = Math.pow(2, ramExponent);
-    const { plan, growPct } = await maxPrepAlgorithm(ns, target, ram);
+    const { plan, growPct } =  maxPrepAlgorithm(ns, target, ram);
     if (growPct == 1) {
       logger.info(`Optimum ram needed for ${target} is ${ram}`, 1);
       return ram;
     } else {
-      return await findRamUntilPrep(ramExponent + 1);
+      return  findRamUntilPrep(ramExponent + 1);
     }
   }
 }

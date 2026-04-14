@@ -45,6 +45,7 @@ import * as consts from '@/lib/constants';
 export async function main(ns: NS) {
   const TARGET_HOSTNAME: string = ns.args[0].toString();
   const CURRENT_SERVER: string  = ns.getHostname();
+  const RAM_BUFFER: number = CURRENT_SERVER == 'home' ? consts.HOME_RAM_BUFFER : 0 ; 
   const PORT   = getRandomInt(100, Number.MAX_SAFE_INTEGER);
 
   const logger = new Logger(ns);
@@ -74,7 +75,7 @@ export async function main(ns: NS) {
     // i.e. if the server has 92% of its available money and is at 108% of min security, that's okay
     const isPrepped: boolean = moneyAvailable > moneyThresh && securityLevel < securityThresh;
     if (!isPrepped) {
-      if (!(await prepServer(TARGET_HOSTNAME))) {
+      if (!( await prepServer(TARGET_HOSTNAME))) {
         logger.error(`Could not find prep algorithm for ${TARGET_HOSTNAME} on ${CURRENT_SERVER}, aborting`);
         return;
       }
@@ -92,8 +93,8 @@ export async function main(ns: NS) {
     let prepPids: Set<number> = new Set;
 
     // loop growing/weakening until we hit our desired threshold
-    const availableRam = ns.getServerMaxRam(CURRENT_SERVER) - ns.getServerUsedRam(CURRENT_SERVER);
-    const { plan, growPct } = await maxPrepAlgorithm(ns, target, availableRam);
+    const availableRam = ns.getServerMaxRam(CURRENT_SERVER) - ns.getServerUsedRam(CURRENT_SERVER) - RAM_BUFFER;
+    const { plan, growPct } =  maxPrepAlgorithm(ns, target, availableRam);
     if (plan.length == 0 ) {
       logger.error(`(${CURRENT_SERVER}) -- no PREP algorithm found for ${TARGET_HOSTNAME}, aborting`);
       return false;
@@ -128,7 +129,7 @@ export async function main(ns: NS) {
     while (scriptsRunning) {
       if (await handler.peek() != `NULL PORT DATA`) {
         // we have data! parse the JSON and assume it's one of our worker types
-        const data: Worker = JSON.parse(await handler.read());
+        const data: Worker = JSON.parse( handler.read());
         if (prepPids.has(data.pid)) {
           logger.info(`Worker ${data.script} (${data.pid}) reported!`,1)
           switch (data.script) {
@@ -186,8 +187,8 @@ export async function main(ns: NS) {
     let hackPids: Set<number> = new Set;
 
     // get the algorithm plan
-    const availableRam = ns.getServerMaxRam(CURRENT_SERVER) - ns.getServerUsedRam(CURRENT_SERVER);
-    const { plan, hackPct } = await maxHackAlgorithm(ns, TARGET_HOSTNAME, availableRam);
+    const availableRam = ns.getServerMaxRam(CURRENT_SERVER) - ns.getServerUsedRam(CURRENT_SERVER) - RAM_BUFFER;
+    const { plan, hackPct } =  maxHackAlgorithm(ns, TARGET_HOSTNAME, availableRam);
     if (plan.length == 0) {
       logger.warn(`(${CURRENT_SERVER}) -- no HACK algorithm found for ${TARGET_HOSTNAME}, returning to prep`);
       logger.info(`Security: ${ns.getServerSecurityLevel(target)} /  ${ns.getServerMinSecurityLevel(target)}`,1);
@@ -200,7 +201,7 @@ export async function main(ns: NS) {
       if (plan[i].threads == 0){ continue; }
       plan[i].args.push(PORT.toString());
 
-      const processId = await ns.exec(plan[i].script, CURRENT_SERVER, plan[i].threads, ...plan[i].args);
+      const processId =  ns.exec(plan[i].script, CURRENT_SERVER, plan[i].threads, ...plan[i].args);
       if (processId == 0) {
         logger.error(`ns.exec(${plan[i].script}, ${CURRENT_SERVER}, ${plan[i].threads}, ${plan[i].args.join(', ')} failed)`);
         return false;
@@ -220,9 +221,9 @@ export async function main(ns: NS) {
     let scriptsRunning = true;
     let counter: number = 0;
     while (scriptsRunning) {
-      if (await handler.peek() != `NULL PORT DATA`) {
+      if ( handler.peek() != `NULL PORT DATA`) {
         // we have data! parse the JSON and assume it's one of our worker types
-        const data: Worker = JSON.parse(await handler.read());
+        const data: Worker = JSON.parse( handler.read());
         if (hackPids.has(data.pid)) {
           logger.info(`Worker ${data.script} (${data.pid}) reported!`,1)
           switch (data.script) {

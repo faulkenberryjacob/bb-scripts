@@ -12,11 +12,13 @@ export async function main(ns: NS) {
   
   const stolen = await ns.hack(TARGET, {additionalMsec: DELAY});
 
-  const envelope: Worker = {
+  const envelope = {
     pid: ns.pid,
-    script: `hack.ts`,
+    host: ns.getHostname(),
+    script: ns.getScriptName(),
     value: stolen
   };
+  ns.print(`${ns.getScriptName()} finished, writing to port: ${JSON.stringify(envelope)}`);
   const jsonEnvelope = JSON.stringify(envelope);
   ns.tryWritePort(PORT, jsonEnvelope);
 }

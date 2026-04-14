@@ -29,9 +29,9 @@ function normalizePath(path) {
 }
 
 
-async function pushFile(remoteAPI, path) {
+ function pushFile(remoteAPI, path) {
     path = normalizePath(path);
-    await fs.stat(path, (err, stat) => {
+     fs.stat(path, (err, stat) => {
         if (err) {
             console.log(err);
             return;
@@ -40,7 +40,7 @@ async function pushFile(remoteAPI, path) {
 
     console.log(`Pushing file ${path}`);
 
-    let content = await fs.readFile(path, 'utf8', (err, data) => {
+    let content =  fs.readFile(path, 'utf8', (err, data) => {
             if (err) {
                 console.log(err);
                 return;
@@ -60,12 +60,16 @@ async function pushFile(remoteAPI, path) {
 
 
 
-const createContext = async () => await context({
+const createContext =  () =>  context({
   entryPoints: [
+    'src/servers/**/*.js',
+    'src/servers/**/*.jsx',
     'src/servers/**/*.ts',
+    'src/servers/**/*.tsx',
   ],
-  outbase: "./src/servers",
-  outdir: "./build",
+  external: ['NetscriptDefinitions'],
+  outbase: './src/servers',
+  outdir: './build',
   plugins: [
     BitburnerPlugin({
       port: 12525,

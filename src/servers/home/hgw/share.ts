@@ -1,4 +1,4 @@
-export async function main(ns: NS) {
+export  function main(ns: NS) {
 
-  await ns.share();
+   ns.share();
 }

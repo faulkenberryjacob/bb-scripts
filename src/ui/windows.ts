@@ -1,5 +1,5 @@
 /** @param {NS} ns **/
-export async function main(ns: NS) {
+export async function tracker(ns: NS) {
   // Create a container div
   const container = document.createElement('div');
   container.id = 'my-ui-container';

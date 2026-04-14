@@ -1,6 +1,6 @@
 // In game documentation example script, ready to go out of the box, plays a game for you provided you have a game to play. 
 /** @param {NS} ns */
-export async function main(ns) {
+export async function go_starter(ns: NS) {
   let result, x, y;
 
   do {
@@ -25,7 +25,7 @@ export async function main(ns) {
     // Log opponent's next move, once it happens
     await ns.go.opponentNextTurn();
 
-    await ns.sleep(200);
+    await ns.sleep(100);
 
     // Keep looping as long as the opponent is playing moves
   } while (result?.type !== "gameOver");
