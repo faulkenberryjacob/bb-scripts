@@ -1,6 +1,7 @@
 import { Logger } from "@/lib/logger";
 import { NetscriptPort, ScriptArg } from "NetscriptDefinitions";
-import { Priority, ScriptConfig, Worker } from "@/lib/types";
+import { LogLevel, ManagerExitCode, Priority, ScriptConfig, Worker } from "@/lib/types";
+import { createScriptConfig } from "./constants";
 
 /**
  * Abstract base class that provides common lifecycle, logging, and port-handling
@@ -53,32 +54,52 @@ import { Priority, ScriptConfig, Worker } from "@/lib/types";
  */
 export abstract class BaseManager {
    ns: NS;
+   status: ManagerExitCode
    logger: Logger;
-   handler: NetscriptPort;
+   handler?: NetscriptPort;
    startTime: number;
-   port: number;
-   args: Record<string, any>;
+   port?: number;
+   args: Record<string, ScriptArg>;
 
+
+   // assume all the elements in ScriptArg[] are maps with the format
+   // {key: string, value: ScriptArg}
    constructor(ns: NS, scriptArgs: ScriptArg[]) {
       this.ns = ns;
-      this.ns.atExit(() => this.finish);
-      this.logger = new Logger(ns);
+      this.status = ManagerExitCode.FAILURE;
+      this.ns.atExit(async () => await this.finish());
+      this.logger = new Logger(ns, LogLevel.DEBUG);
       this.logger.info(`-- Starting ${this.ns.getScriptName()} --`);
       this.startTime = Date.now();
 
-      const rawArgs = JSON.parse(scriptArgs[0] as string);
-      this.args = rawArgs.args;
-      
-      if (this.args) {
-         this.logger.debug(`${ns.getScriptName()} received args:`);
-         for (const [key, value] of Object.entries(this.args)) {
-            this.logger.debug(`${key}:${value}`,1);
+      // 1. Flatten the array of JSON strings into a single Record
+      const combinedArgs: Record<string, ScriptArg> = scriptArgs.reduce((acc, arg) => {
+         try {
+            const parsed = JSON.parse(arg as string);
+            return { ...acc, ...parsed };
+         } catch {
+            return acc;
          }
-      }
-      // Let subclasses parse args however they need
-      this.port = rawArgs[`port`] as number;
+      }, {});
 
-      this.handler = ns.getPortHandle(this.port as number);
+      // 2. Extract and assign the port if it exists
+      if ("port" in combinedArgs) {
+         this.port = combinedArgs["port"] as number;
+         // 3. Remove it so subclasses don't see it in this.args
+         delete combinedArgs["port"];
+      } else {
+         this.port = -1;
+      }
+
+      // 4. Assign the remaining clean Record to the class
+      this.args = combinedArgs;
+
+      if (this.port > 0) {
+         this.logger.info(`Port has been set to ${this.port}`);
+         this.handler = ns.getPortHandle(this.port);
+      } else {
+         this.logger.warn(`No port was set for ${this.ns.getScriptName()}!`);
+      }
    }
 
    /**
@@ -92,64 +113,51 @@ export abstract class BaseManager {
       if (target) {
          return target;
       }
-      this.logger.error(`Could not find arg [${desired}] in [${this.ns.getScriptName()}]`,0,true);
+      this.logger.error(`Could not find arg [${desired}] in [${this.ns.getScriptName()}]`, 0, true);
       return undefined;
    }
 
-      /**
-       * Creates a script configuration object with the specified parameters.
-       * @param {string} name - The display name for the script.
-       * @param {string} script - The script filename to execute.
-       * @param {string[]} [args] - Optional array of arguments to pass to the script.
-       * @param {boolean} [homeLocked=false] - Whether the script should only run on the home server.
-       * @param {boolean} [enabled=true] - Whether the script is enabled for execution.
-       * @returns {ScriptConfig} - A configured script object ready for deployment.
-       */
-      createScriptConfig(
-         name: string,
-         script: string,
-         args?: any,
-         homeLocked: boolean = false,
-         enabled: boolean = true,
-         isRunning: boolean = false,
-         priority: Priority = Priority.STANDARD
-      ): ScriptConfig {
-         // We use this format to enforce we pass a port, which is required
-         // for a child script to write back that it's finished. Without that,
-         // our engine will never know when a child script is done.
-         const scriptArgs = {
-            port: this.port,
-            args: args
-         }
-         const jsonArgs = JSON.stringify(scriptArgs);
-         this.logger.debug(`Created ScriptConfig for ${script} that is ${jsonArgs}`);
-         const obj: ScriptConfig = {
-            name,
-            script,
-            priority,
-            args: [jsonArgs],
-            port: this.port,
-            enabled,
-            homeLocked,
-            isRunning
-         };
-         return obj;
-      }
+   /**
+    * Creates a script configuration object with the specified parameters.
+    * @param {string} name - The display name for the script.
+    * @param {string} script - The script filename to execute.
+    * @param {string[]} [args] - Optional array of arguments to pass to the script.
+    * @param {boolean} [homeLocked=false] - Whether the script should only run on the home server.
+    * @param {boolean} [enabled=true] - Whether the script is enabled for execution.
+    * @returns {ScriptConfig} - A configured script object ready for deployment.
+    */
+   createScriptConfig = createScriptConfig;
 
    abstract start(): void;
 
-   finish() {
-      this.logger.debug(`Exiting ${this.ns.getScriptName()}..`);
-      const worker: Worker = {
-         pid: this.ns.pid,
-         script: this.ns.getScriptName(),
-         value: 0,
-         host: this.ns.getHostname(),
-         duration: Date.now() - this.startTime == 0 ? 1 : Date.now() - this.startTime
-      };
-      this.logger.debug(`Writing finish to port ${this.port}:`);
-      this.logger.debug(`${JSON.stringify(worker)}`);
-      this.handler.write(JSON.stringify(worker));
+   success() {
+      this.status = ManagerExitCode.SUCCESS;
       this.ns.exit();
+   }
+
+   fail() {
+      this.status = ManagerExitCode.FAILURE;
+      this.ns.exit();
+   }
+
+   skipMe() {
+      this.status = ManagerExitCode.UNOBTAINABLE;
+      this.ns.exit();
+   }
+
+   async finish() {
+      this.logger.info(`Exiting ${this.ns.getScriptName()}..`);
+      if (this.handler) {
+         const worker: Worker = {
+            pid: this.ns.pid,
+            script: this.ns.getScriptName(),
+            value: this.status,
+            host: this.ns.getHostname(),
+            duration: Date.now() - this.startTime == 0 ? 1 : Date.now() - this.startTime
+         };
+         this.logger.debug(`Writing finish to port ${this.port}:`);
+         this.logger.debug(`${JSON.stringify(worker)}`);
+         while (!this.handler.tryWrite(JSON.stringify(worker))) { await this.ns.sleep(1); }
+      }
    }
 }

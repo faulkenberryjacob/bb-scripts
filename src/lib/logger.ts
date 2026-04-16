@@ -2,13 +2,35 @@ import { DEFAULT_LOG_LEVEL } from '@/lib/constants';
 import { LogLevel } from './types';
 
 export enum Colors {
-  Red =      "\u001b[31m",
-  Green =    "\u001b[32m",
-  Yellow =   "\u001b[33m",
-  Blue =     "\u001b[34m",
-  Cyan =     "\u001b[36m",
-  Magenta =  "\u001b[35m", 
-  None =     ""
+  // Foreground (text) colors
+  Reset =     "\u001b[0m",
+  Red =       "\u001b[31m",
+  Green =     "\u001b[32m",
+  Yellow =    "\u001b[33m",
+  Blue =      "\u001b[34m",
+  Magenta =   "\u001b[35m",
+  Cyan =      "\u001b[36m",
+  Gray =      "\u001b[90m",
+  White =     "\u001b[37m",
+  
+  // Bright/Bold variants
+  BrightRed =     "\u001b[91m",
+  BrightGreen =   "\u001b[92m",
+  BrightYellow =  "\u001b[93m",
+  BrightBlue =    "\u001b[94m",
+  
+  // Background colors
+  BgRed =     "\u001b[41m",
+  BgGreen =   "\u001b[42m",
+  BgYellow =  "\u001b[43m",
+  BgBlue =    "\u001b[44m",
+  
+  // Text styles
+  Bold =      "\u001b[1m",
+  Dim =       "\u001b[2m",
+  Italic =    "\u001b[3m",
+  Underline = "\u001b[4m",
+  None =      ""
 }
 
 /**
@@ -25,14 +47,19 @@ export class Logger {
     this.logLevel = level;
   }
 
+  setLogLevel(level: LogLevel) {
+    this.logLevel = level;
+  }
+
   info(message: string, indent: number = 0, color: Colors = Colors.None, terminal: boolean = false): void {
     if (this.logLevel < LogLevel.INFO) return;
     const callerInfo = Logger.getCallerInfo();
     let indentation: string = "";
     for (let i = 0; i < indent; i++) { indentation += "  "; }
-    const formMessage = `[${Logger.getTimestampFormat()}] ${callerInfo} INFO: ${color}${indentation}${message}${color == Colors.None ? "" : `\u001b[0m`}`;
+    const formMessage = `[${Logger.getTimestampFormat()}] ${callerInfo} INFO: ${color}${indentation}${message}${color == Colors.None ? "" : `${Colors.Reset}`}`;
     this.ns.print(formMessage);
     if (terminal) this.ns.tprint(formMessage);
+    console.log(formMessage);
   }
 
   /**
@@ -48,6 +75,7 @@ export class Logger {
     const formMessage = `[${Logger.getTimestampFormat()}] ${callerInfo} WARN: ${indentation}${message}`;
     this.ns.print(formMessage);
     if (terminal) this.ns.tprint(formMessage);
+    console.log(formMessage);
   }
 
   /**
@@ -63,6 +91,7 @@ export class Logger {
     const formMessage = `[${Logger.getTimestampFormat()}] ${callerInfo} ERROR: ${indentation}${message}`;
     this.ns.print(formMessage);
     if (terminal) this.ns.tprint(formMessage);
+    console.log(formMessage);
   }
 
   /**
@@ -78,6 +107,7 @@ export class Logger {
     const formMessage = `[${Logger.getTimestampFormat()}] ${callerInfo} DEBUG: ${indentation}${message}`;
     this.ns.print(formMessage);
     if (terminal) this.ns.tprint(formMessage);
+    console.log(formMessage);
   }
 
   /**

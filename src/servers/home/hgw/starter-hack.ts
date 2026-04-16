@@ -4,7 +4,7 @@ import { roundTo } from '@/lib/calc';
 
 export async function main(ns: NS) {
   // Defines the "target server"
-  const TARGET_HOSTNAME = ns.args[0].toString();
+  const TARGET_HOSTNAME = ns.getHostname();
   const logger = new Logger(ns);
   ns.disableLog("ALL");
 

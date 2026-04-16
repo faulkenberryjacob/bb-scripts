@@ -3,10 +3,10 @@ import { hasSingularity } from "@/lib/defaults";
 import { Colors } from "@/lib/logger";
 
 class FactionManager extends BaseManager {
-   start() {
-      if (!hasSingularity(this.ns)) { this.finish(); }
+   async start() {
+      if (!hasSingularity(this.ns)) { this.skipMe(); }
       this.joinFactions();
-      this.finish();
+      this.success();
    }
 
    joinFactions() {
@@ -22,5 +22,5 @@ class FactionManager extends BaseManager {
 export async function main(ns: NS) {
    ns.disableLog("ALL");
    const fm = new FactionManager(ns, ns.args);
-   fm.start();
+   await fm.start();
 }

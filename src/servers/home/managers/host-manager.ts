@@ -2,11 +2,12 @@ import { BaseManager } from "@/lib/BaseManager";
 import * as consts from "@/lib/constants";
 import { getPurchasedServerNames } from "@/lib/defaults";
 import { formatDollar } from "@/lib/formatter";
+import { Colors } from "@/lib/logger";
 
 class HostManager extends BaseManager {
-   start() {
+   async start() {
       this.buyServers();
-      this.finish();
+      this.success();
    }
 
    buyServers() {
@@ -20,19 +21,20 @@ class HostManager extends BaseManager {
       while (canAfford) {
          const desiredRam = Math.pow(2, ramExponent);
          const cost = this.ns.getPurchasedServerCost(desiredRam);
+         this.logger.info(`Cost for ${desiredRam} GB is ${formatDollar(this.ns, cost)}`);
          if (playerMoney < cost) { return; }
 
          for (let i = 0; i < pServers.length; i++) {
 
             // if this server doesn't exist, purchase it
             if (!this.ns.serverExists(pServers[i])) {
-               this.logger.info(`Purchasing server ${pServers[i]} with ${desiredRam} GB of RAM for ${formatDollar(this.ns, cost)}`, 0, undefined, true);
+               this.logger.info(`Purchasing server ${pServers[i]} with ${desiredRam} GB of RAM for ${formatDollar(this.ns, cost)}`, 0, Colors.Magenta, true);
                this.ns.purchaseServer(pServers[i], desiredRam);
             } else {
                // if it already exists but with less ram, upgrade it
                if (this.ns.getServerMaxRam(pServers[i]) < desiredRam) {
                   try {
-                     this.logger.info(`Upgrading server ${pServers[i]} to ${desiredRam} GB of RAM for ${formatDollar(this.ns, cost)}`, 0, undefined, true);
+                     this.logger.info(`Upgrading server ${pServers[i]} to ${desiredRam} GB of RAM for ${formatDollar(this.ns, cost)}`, 0, Colors.Magenta, true);
                      this.ns.upgradePurchasedServer(pServers[i], desiredRam);
                   } catch (error) {
                      this.logger.error(`Error upgrading server ${pServers[i]}: ${error}`);
@@ -57,5 +59,5 @@ class HostManager extends BaseManager {
 export async function main(ns: NS) {
    ns.disableLog("ALL");
    const hm = new HostManager(ns, ns.args);
-   hm.start();
+   await hm.start();
 }

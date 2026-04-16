@@ -3,6 +3,7 @@ import { getServerData, getServersWithNoBackdoor } from "@/lib/db";
 import { hasSingularity } from "@/lib/defaults";
 import { Colors } from "@/lib/logger";
 import { connectChainToServer } from "@/lib/system";
+import { ManagerExitCode } from "@/lib/types";
 import { ScriptArg } from "NetscriptDefinitions";
 
 class BackdoorManager extends BaseManager {
@@ -15,12 +16,12 @@ class BackdoorManager extends BaseManager {
    }
 
    async start() {
-      if (!hasSingularity(this.ns)) { this.finish(); }
-      if (this.servers.length == 0) { this.finish(); }
+      if (!hasSingularity(this.ns)) { this.skipMe(); }
+      if (this.servers.length == 0) { this.fail(); }
 
       await this.backdoor();
 
-      this.finish();
+      this.success();
    }
 
    async backdoor() {

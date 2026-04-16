@@ -5,8 +5,8 @@ import { Colors } from '@/lib/logger';
 import { hasSingularity } from '@/lib/defaults';
 
 class CrimeManager extends BaseManager {
-   start() {
-      if (!hasSingularity(this.ns)) { this.finish(); }
+   async start() {
+      if (!hasSingularity(this.ns)) { this.skipMe(); }
 
       const bestCrime = this.commitBestCrime();
       if (bestCrime) {
@@ -14,7 +14,7 @@ class CrimeManager extends BaseManager {
          this.ns.singularity.commitCrime(bestCrime);
       }
 
-      this.finish();
+      this.success();
    }
 
    commitBestCrime(): CrimeType | null {
@@ -64,5 +64,5 @@ class CrimeManager extends BaseManager {
 export async function main(ns: NS) {
    ns.disableLog("ALL");
    const cm = new CrimeManager(ns, ns.args);
-   cm.start();
+   await cm.start();
 }

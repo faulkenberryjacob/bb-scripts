@@ -1,9 +1,9 @@
 import { BaseManager } from "@/lib/BaseManager";
 import * as consts from "@/lib/constants";
-import { getMostProfitableServer, getServerSpace, getTotalFreeSpace } from "@/lib/db";
-import { HackAlgorithm } from "@/lib/hack-algorithm-2";
-import { Worker, Plan, Time, ScriptConfig } from "@/lib/types";
-import { orchestrateScript, killOrchestratedScripts, verifyScript, getScriptName } from "@/lib/system";
+import { findBestHackPlan, findBestPrepPlan, getMostProfitableServerWithAlgo, getServerData } from "@/lib/db";
+import { HackAlgorithm } from "@/lib/hack-algorithm";
+import { Plan, Time, ScriptConfig, LogLevel, ManagerExitCode, Priority } from "@/lib/types";
+import { orchestrateScript, getFreeSpace, getServersBySpace } from "@/lib/system";
 import { NetscriptPort, ScriptArg } from "NetscriptDefinitions";
 import { getRandomInt } from "@/lib/calc";
 import { formatDollar } from "@/lib/formatter";
@@ -42,11 +42,11 @@ const RAM_LIMIT = 10240;
 const MONITOR_INTERVAL = 30 * Time.SECOND; // 30 seconds
 
 class ControllerManager extends BaseManager {
-   target: string;
    runningScripts: Map<string, { pid: number, script: string, host: string }>;
-   minRam: number;
-   port: number;
-   handler: NetscriptPort;
+   prepPlan: Plan[];
+   hackPlan: Plan[];
+   orcPort: number;
+   orcHandler: NetscriptPort;
    orc?: ScriptConfig;
    isPrepping: boolean;
 
@@ -54,103 +54,56 @@ class ControllerManager extends BaseManager {
       super(ns, scriptArgs);
       //this.ns.ui.openTail();
 
-      this.target = getMostProfitableServer(this.ns);
-      this.runningScripts = new Map();
-      this.minRam = this.getMinimumRamForHack();
+      this.prepPlan = findBestPrepPlan(this.ns);
+      this.hackPlan = findBestHackPlan(this.ns);
 
-      this.port = getRandomInt();
-      this.handler = this.ns.getPortHandle(this.port);
-      this.handler.clear();
-      this.isPrepping = false;
+      this.runningScripts = new Map();
+
+      this.orcPort = getRandomInt();
+      this.orcHandler = this.ns.getPortHandle(this.orcPort);
+      this.orcHandler.clear();
+      this.isPrepping = this.hackPlan.length == 0;
+
+      if (this.prepPlan.length == 0 && this.hackPlan.length == 0) {
+         this.logger.error(`No achievable plans found. Exiting..`);
+         this.fail();
+      }
+
    }
 
 
    async start() {
-      while (true) {
-         // Check how much RAM is necessary for a 100% hack
-         if (this.minRam <= 0) {
-            this.finish();
-         }
+      const plans = this.isPrepping ? this.prepPlan : this.hackPlan;
 
-         // Get free RAM available, with a small buffer
-         const availableRam = getTotalFreeSpace(this.ns);
-
-         // Get a plan using that available RAM
-         this.logger.debug(`Finding hack plans..`);
-         let plans = new HackAlgorithm(this.ns, this.target, availableRam, 1).maxHackAlgorithm().plan;
-
-         if (!plans || plans.length <= 0) {
-            this.logger.warn(`No HACK plans were found for ${this.target}! We will prep instead`);
-            this.isPrepping = true;
-            plans = new HackAlgorithm(this.ns, this.target, availableRam, 1).maxPrepAlgorithm().plan;
-
-            if (!plans || plans.length <= 0) {
-               this.logger.warn(`No PREP plans were found for ${this.target}! Exiting..`);
-               this.finish();
-            }
-         }
-
-         this.logger.debug(`We found ${plans.length} plans!`);
-         const badPlans = plans.filter(p => p.threads == 0);
-         if (badPlans && badPlans.length > 0) {
-            this.logger.error(`${badPlans.length} plans were found with no defined threads!`);
-            this.logger.error(`Ex: ${badPlans[0].script} with args [${badPlans[0].args} and threads ${badPlans[0].threads}`);
-            this.finish();
-         }
-
-         const minWaitTime = plans.reduce((min, current) =>
-            current.runTime < min.runTime ? current : min
-         ).runTime;
-
-         // Orchestrate plan
-         this.orc = this.createScriptConfig(
-            "Orchestrator",
-            consts.ORCHESTRATOR_SCRIPT,
-            {
+      // Orchestrate plan
+      this.orc = this.createScriptConfig(
+         consts.ORCHESTRATOR_SCRIPT,
+         Priority.PRIORITY,
+         {
+            args: {
                plan: JSON.stringify(plans),
                isPrep: this.isPrepping
             },
-            true // run this on `home`
-         );
-
-         //await this.orchestrateHack(plans.plan);
-         this.startOrchestrator();
-
-         // Monitor the port and wait for all tasks to complete
-         //await this.monitorPort();
-         await this.monitorPort_new();
-      }
-
-
-      this.finish();
-   }
-
-   getMinimumRamForHack(): number {
-      this.logger.debug(`Finding minimum RAM necessary to hack ${this.target}`);
-      let low = 0;
-      let high = RAM_LIMIT; // Adjust upper bound as needed
-      let result = high;
-
-      while (low <= high) {
-         const mid = Math.floor((low + high) / 2);
-         const ha = new HackAlgorithm(this.ns, this.target, mid, 1);
-
-         if (ha.isHackPossible()) {
-            result = mid; // This RAM amount works, try lower
-            high = mid - 1;
-         } else {
-            low = mid + 1; // This RAM amount doesn't work, try higher
+            port: this.orcPort,
+            homeLocked: true
          }
-      }
+      );
 
-      this.logger.info(`Found minimum RAM for hwgw: ${result}`, 1);
-      return result;
+      //await this.orchestrateHack(plans.plan);
+      this.startOrchestrator();
+
+      // Monitor the port and wait for all tasks to complete
+      await this.monitorPort();
+      //await this.monitorPort_new();
+
+
+      this.success();
    }
 
    async orchestrateHack(plan: Plan[]) {
       this.logger.debug(`Orchestrating ${plan.length} hack plans`);
       for (const p of plan) {
-         p.args.push(this.port.toString());
+         p.args.push(this.orcPort.toString());
          const result = orchestrateScript(this.ns, p.script, p.threads, p.args);
          if (result.code == 0) {
             this.logger.debug(`${p.script} with args ${p.args} has kicked off successfully`, 1);
@@ -168,8 +121,13 @@ class ControllerManager extends BaseManager {
 
    startOrchestrator(): { code: number, pid: number, host: string } {
       if (this.orc) {
-         this.logger.debug(`Starting ${this.orc.name} (${this.orc.script})..`);
-         const result = orchestrateScript(this.ns, this.orc.script, 1, this.orc.args);
+         this.logger.debug(`Starting ${this.orc.script} (${this.orc.script})..`);
+         const dependencies: string[] = [
+            consts.HACK_SCRIPT,
+            consts.WEAK_SCRIPT,
+            consts.GROW_SCRIPT
+         ]
+         const result = orchestrateScript(this.ns, this.orc.script, 1, this.orc.args, false, dependencies);
 
          if (result.code == 0) {
             this.logger.debug(`${this.orc.script} with args ${this.orc.args} has kicked off successfully on ${result.host}`, 1);
@@ -190,11 +148,11 @@ class ControllerManager extends BaseManager {
       let timeSinceLastUpdate: number = Date.now();
 
       while (true) {
-         await this.handler.nextWrite();
+         await this.orcHandler.nextWrite();
 
-         while (this.handler.peek() != "NULL PORT DATA") {
+         while (this.orcHandler.peek() != "NULL PORT DATA") {
             // Remove that combination host + pid from our runningScripts array.
-            const result = JSON.parse(this.handler.read()) as { pid: number, host: string, script: string, value: number };
+            const result = JSON.parse(this.orcHandler.read()) as { pid: number, host: string, script: string, value: number };
             this.logger.debug(`Port read: [${result.pid}] ${result.script} from host ${result.host}, value [${this.ns.formatNumber(result.value)}]`);
             const originalLength = this.runningScripts.size;
 
@@ -244,9 +202,9 @@ class ControllerManager extends BaseManager {
 
       // While we keep finding things written to the port..
       while (this.runningScripts.size > 0) {
-         while (this.handler.peek() != "NULL PORT DATA") {
+         while (this.orcHandler.peek() != "NULL PORT DATA") {
             // Remove that combination host + pid from our runningScripts array.
-            const result = JSON.parse(this.handler.read()) as { pid: number, host: string, script: string, value: number };
+            const result = JSON.parse(this.orcHandler.read()) as { pid: number, host: string, script: string, value: number };
             this.logger.debug(`Port read: [${result.pid}] ${result.script} from host ${result.host}, value [${this.ns.formatNumber(result.value)}]`);
             const originalLength = this.runningScripts.size;
 
@@ -277,7 +235,7 @@ class ControllerManager extends BaseManager {
                }
             }
             if (Date.now() - timeSinceLastUpdate >= MONITOR_INTERVAL) {
-               this.logger.info(`Monitoring ${newLength} scripts..`, 1);
+               this.logger.info(`Monitoring ${newLength} scripts..`, 0, undefined, true);
                this.logger.info(`${this.ns.getScriptName()} has stolen ${formatDollar(this.ns, moneyTally)} so far, ` +
                   `or ${formatDollar(this.ns, moneyTally / ((Date.now() - this.startTime) / Time.SECOND))} per second.`, 0, Colors.Green, true);
                timeSinceLastUpdate = Date.now();
@@ -288,6 +246,8 @@ class ControllerManager extends BaseManager {
          await this.ns.sleep(10);
          if (Date.now() - timeSinceLastUpdate >= MONITOR_INTERVAL) {
             this.logger.info(`Monitoring ${this.runningScripts.size} scripts..`, 1);
+            this.logger.info(`${this.ns.getScriptName()} has stolen ${formatDollar(this.ns, moneyTally)} so far, ` +
+                  `or ${formatDollar(this.ns, moneyTally / ((Date.now() - this.startTime) / Time.SECOND))} per second.`, 0, Colors.Green, true);
             timeSinceLastUpdate = Date.now();
          }
       }

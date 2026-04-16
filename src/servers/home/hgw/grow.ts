@@ -20,5 +20,5 @@ export async function main(ns: NS) {
   };
   ns.print(`${ns.getScriptName()} finished, writing to port: ${JSON.stringify(envelope)}`);
   const jsonEnvelope = JSON.stringify(envelope);
-  ns.tryWritePort(PORT, jsonEnvelope);
+  while (!ns.tryWritePort(PORT, jsonEnvelope)) { await ns.sleep(1); }
 }

@@ -1,7 +1,7 @@
 import { BaseManager } from "@/lib/BaseManager";
-import { getServerSpace } from "@/lib/db";
-import { orchestrateScript, verifyScript } from "@/lib/system";
-import { Plan, Time } from "@/lib/types";
+import { getServerSpace, getTotalFreeSpaceFromDB } from "@/lib/db";
+import { canWeDeployPlan, getFreeSpace, orchestrateScript, verifyScript } from "@/lib/system";
+import { LogLevel, Plan, Time } from "@/lib/types";
 import { ScriptArg } from "NetscriptDefinitions";
 /*
    When ORCHESTRATOR and all its children script finish,
@@ -32,24 +32,26 @@ import { ScriptArg } from "NetscriptDefinitions";
 */
 
 const ORC_INTERVAL: number = 10; // milliseconds between each execution
+const RETRY_PERIOD: number = 30;
+const ORC_DURATION: number = 30 * Time.MINUTE; // duration of entire script before it terminates
 
 class Orchestrator extends BaseManager {
    scripts: Plan[];
+   planRam: number;
    isPrep: boolean;
    runningScripts: { pid: number, script: string, host: string }[];
 
    constructor(ns: NS, scriptArgs: ScriptArg[]) {
       super(ns, scriptArgs);
       //this.ns.ui.openTail();
-      this.scripts = JSON.parse(this.args[`plan`]) as Plan[];
+      this.scripts = JSON.parse(this.args[`plan`] as string) as Plan[];
+      this.planRam = this.getTotalRamForPlan();
       this.isPrep  = this.args[`isPrep`] as boolean;
       this.runningScripts = [];
    }
 
    async start() {
-      debugger;
       const result = await this.orchestrate();
-      debugger;
 
       if (result) {
          this.logger.info(`Orchestrator (PID: ${this.ns.pid}) deployed plans successfully!`)
@@ -57,13 +59,26 @@ class Orchestrator extends BaseManager {
          this.logger.warn(`Orchestrator (PID: ${this.ns.pid}) failed to deploy some plans!`);
       }
 
-      this.finish();
+      this.success();
+   }
+   
+   getTotalRamForPlan() {
+      let totalRam = 0;
+      for (const p of this.scripts) {
+         totalRam += this.ns.getScriptRam(p.script) * p.threads;
+      }
+      return totalRam;
+
    }
 
    async orchestrate(): Promise<boolean> {
       this.logger.info(`Orchestrating given plans..`);
+      while (!canWeDeployPlan(this.ns, this.scripts)) {
+         this.logger.warn(`Not enough free space for entire plan. Waiting..`,1);
+         await this.ns.sleep(100);
+      }
       for (const p of this.scripts) {
-         p.args.push(this.port.toString());
+         if (this.port) { p.args.push(this.port.toString()); }
          this.logger.info(`${p.script} [${p.threads}] will run for ${p.runTime} with args [${p.args}]`, 1);
       }
 
@@ -72,65 +87,66 @@ class Orchestrator extends BaseManager {
       await this.ns.sleep(2000);
 
       while (true) {
+         if (!canWeDeployPlan(this.ns, this.scripts)) {
+            this.logger.warn(`Cannot deploy plan right now. Stalling..`);
+            await this.ns.sleep(1000);
+            continue;
+         }
 
          for (const p of this.scripts) {
-            const result = orchestrateScript(this.ns, p.script, p.threads, p.args);
+            let timeTaken: number = 0;
+            let result = orchestrateScript(this.ns, p.script, p.threads, p.args);
+
+            // Try to force the orchestration
+            while (result.code != 0) {
+               this.logger.debug(`${p.script} didn't deploy, trying again..`) ;
+               await this.ns.sleep(1);
+               result = orchestrateScript(this.ns, p.script, p.threads, p.args);
+               timeTaken+=1;
+               if (timeTaken >= RETRY_PERIOD) {
+                  this.logger.warn(`${p.script} failed to deploy on ${result.host} with exitcode ${result.code}`);
+                  break;
+               }
+            }
+            //const result = orchestrateScript(this.ns, p.script, p.threads, p.args);
             if (result.code == 0) {
 
-               // If we're unable to write to the port, wait for 30 seconds and try again
-               if (!this.informController(result.pid, result.host, p.script)) {
-                  this.logger.warn(`Cannot write to port, stalling..`);
-                  await this.ns.sleep(1 * Time.SECOND);
-               }
-            } else {
-               this.logger.warn(`${p.script} failed to deploy on ${result.host} with exitcode ${result.code}`);
-               if (result.code == 2) {
-                  // if this is a "not enough space" error, chill out for awhile
-                  await this.ns.sleep(30 * Time.SECOND);
-               }
+               // inform the controller it has a new script to monitor
+               await this.informController(result.pid, result.host, p.script);
+
             }
 
             await this.ns.sleep(ORC_INTERVAL);
          }
 
-         // If we're just prepping the server, exit
-         if (this.isPrep) {
-            this.finish();
+         // If we're just prepping the server or hit our time limit, exit
+         if (this.isPrep || (Date.now() - this.startTime) > ORC_DURATION ) {
+            this.success();
          }
 
          await this.ns.sleep(ORC_INTERVAL);
       }
-
-      // let success = true;
-      // for (const p of this.scripts) {
-      //    const planResult = this.startPlan(p);
-      //    if (planResult.code == 0) {
-      //       this.informController(planResult.pid, planResult.host, p.script);
-      //    } else {
-      //       success = false;
-      //    }
-      //    this.logger.debug(`${p.script} attempted to deploy to ${planResult.host} and returned ${planResult.code}`, 2);
-
-      //    await this.ns.sleep(ORC_INTERVAL);
-      // }
-      // return success;
    }
 
    startPlan(p: Plan): { code: number, pid: number, host: string } {
-      p.args.push(this.port.toString());
+      if (this.port) { p.args.push(this.port.toString()); }
       this.logger.debug(`Attempting to start ${p.script} with ${p.threads} and args ${p.args}..`, 1);
       return orchestrateScript(this.ns, p.script, p.threads, p.args);
    }
 
-   informController(pid: number, host: string, script: string) {
+   async informController(pid: number, host: string, script: string) {
+      if (!this.port || !this.handler) { return false; }
       const envelope = {
          pid: pid,
          host: host,
          script: script,
          value: -1
       };
+
+      while (! this.handler.tryWrite(JSON.stringify(envelope)) ) { await this.ns.sleep(1); }
+
+      return true;
       
-      return this.handler.tryWrite(JSON.stringify(envelope));
    }
 
 }

@@ -13,9 +13,9 @@ class RootManager extends BaseManager {
       this.scannedServers = new Set();
    }
 
-   start() {
+   async start() {
       this.rootServers()
-      this.finish();
+      this.success();
    }
 
    rootServers() {
@@ -96,5 +96,5 @@ class RootManager extends BaseManager {
 export async function main(ns: NS) {
    ns.disableLog("ALL");
    const root = new RootManager(ns, ns.args);
-   root.start();
+   await root.start();
 }

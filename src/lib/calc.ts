@@ -1,7 +1,6 @@
 import { getHackableServers } from "./db";
 import * as consts from "./constants";
 import { Logger } from "./logger";
-import { maxHackAlgorithm, maxPrepAlgorithm } from "./hack-algorithm";
 import { formatDollar } from "./formatter";
 import { hasFormulas } from "./defaults";
 
@@ -147,104 +146,4 @@ export  function findLowestPowerOfTwo(num: number): number {
       throw new Error("Number must be greater than zero");
   }
   return Math.ceil(Math.log2(num));
-}
-
-/**
- * Determines the minimum RAM needed to hack a target server.
- *
- * @param {NS} ns - The Netscript environment.
- * @param {string} target - The name of the target server.
- * @returns {number} - A promise that resolves to the minimum RAM needed for hacking the target server.
- */
-export  function determineMinimumRamNeededForHack(ns: NS, target: string) {
-  const logger = new Logger(ns);
-  logger.info(`Determining minimum ram needed for ${target}`);
-
-  return findRamUntilHack(1);
-
-   function findRamUntilHack(ramExponent: number) {
-    const ram = Math.pow(2, ramExponent);
-    const { plan, hackPct } =  maxHackAlgorithm(ns, target, ram);
-    if (plan.length > 0) {
-      logger.info(`Minimum ram needed for ${target} is ${ram}`, 1);
-      return ram;
-    } else {
-       findRamUntilHack(ramExponent + 1);
-    }
-  }
-}
-
-/**
- * Determines the optimum RAM needed to hack a target server.
- *
- * @param {NS} ns - The Netscript environment.
- * @param {string} target - The name of the target server.
- * @returns {number} - A promise that resolves to the optimum RAM needed for hacking the target server.
- */
-export  function determineOptimumRamNeededForHack(ns: NS, target: string) {
-  const logger = new Logger(ns);
-  logger.info(`Determining optimum ram needed for ${target}`);
-
-  return findRamUntilHack(1);
-
-   function findRamUntilHack(ramExponent: number) {
-    const ram = Math.pow(2, ramExponent);
-    const { plan, hackPct } =  maxHackAlgorithm(ns, target, ram);
-    if (hackPct == 1) {
-      logger.info(`Optimum ram needed for ${target} is ${ram}`, 1);
-      return ram;
-    } else {
-      return  findRamUntilHack(ramExponent + 1);
-    }
-  }
-}
-
-/**
- * Determines the minimum RAM needed to Prep a target server.
- *
- * @param {NS} ns - The Netscript environment.
- * @param {string} target - The name of the target server.
- * @returns {number} - A promise that resolves to the minimum RAM needed for prepping the target server.
- */
-export  function determineMinimumRamNeededForPrep(ns: NS, target: string) {
-  const logger = new Logger(ns);
-  logger.info(`Determining minimum ram needed for ${target}`);
-
-  return findRamUntilPrep(1);
-
-   function findRamUntilPrep(ramExponent: number) {
-    const ram = Math.pow(2, ramExponent);
-    const { plan, growPct } =  maxPrepAlgorithm(ns, target, ram);
-    if (plan.length > 0) {
-      logger.info(`Minimum ram needed for ${target} is ${ram}`, 1);
-      return ram;
-    } else {
-       findRamUntilPrep(ramExponent + 1);
-    }
-  }
-}
-
-/**
- * Determines the optimum RAM needed to Prep a target server.
- *
- * @param {NS} ns - The Netscript environment.
- * @param {string} target - The name of the target server.
- * @returns {number} - A promise that resolves to the optimum RAM needed for prepping the target server.
- */
-export  function determineOptimumRamNeededForPrep(ns: NS, target: string) {
-  const logger = new Logger(ns);
-  logger.info(`Determining optimum ram needed for ${target}`);
-
-  return findRamUntilPrep(1);
-
-   function findRamUntilPrep(ramExponent: number) {
-    const ram = Math.pow(2, ramExponent);
-    const { plan, growPct } =  maxPrepAlgorithm(ns, target, ram);
-    if (growPct == 1) {
-      logger.info(`Optimum ram needed for ${target} is ${ram}`, 1);
-      return ram;
-    } else {
-      return  findRamUntilPrep(ramExponent + 1);
-    }
-  }
 }

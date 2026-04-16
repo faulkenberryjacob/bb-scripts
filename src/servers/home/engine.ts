@@ -1,9 +1,10 @@
-import { Logger } from "@/lib/logger";
+import { Colors, Logger } from "@/lib/logger";
 import * as consts from "@/lib/constants";
-import { Queue, ScriptConfig, exitCodeMessages, Time, Worker, LogLevel, PriorityQueue, Priority, Script } from "@/lib/types";
+import { Queue, ScriptConfig, exitCodeMessages, Time, Worker, LogLevel, PriorityQueue, Priority, Script, ManagerExitCode, updateScriptConfigArg } from "@/lib/types";
 import { verifyScript, orchestrateScript, getScriptName } from "@/lib/system";
-import { NetscriptPort } from "NetscriptDefinitions";
+import { NetscriptPort, ScriptArg } from "NetscriptDefinitions";
 import { getRandomInt } from '@/lib/calc';
+import { getOwnedServers, getOwnedServersData, getServersWithRoot, readDB } from "@/lib/db";
 
 /*
    The main engine/progression script of this repository.
@@ -46,28 +47,47 @@ import { getRandomInt } from '@/lib/calc';
 
 */
 
+const RESET_INTERVAL = 30 * Time.MINUTE;
+const STARTUP_GRACE_PERIOD = 10 * Time.SECOND;
+const DEPLOY_RATE = 500;
+
 class Engine {
    ns: NS;
    logger: Logger;
    queue: PriorityQueue;
-   bench: Map<string, ScriptConfig>
+   failed: Queue<ScriptConfig>;
+   bench: Map<string, ScriptConfig>;
 
    private pollingRate: number; // milliseconds
-   private intervalPeriod: number; // minutes
    private port: number;
    private handler: NetscriptPort;
+   private canController: boolean;
+   private startTime: number;
 
    constructor(ns: NS) {
       this.ns = ns;
       this.logger = new Logger(ns);
       this.queue = new PriorityQueue;
       this.bench = new Map();
+      this.failed = new Queue();
 
+      this.startTime = Date.now();
       this.pollingRate = 1000;
-      this.intervalPeriod = 30 * Time.MINUTE;
       this.port = getRandomInt();
       this.handler = this.ns.getPortHandle(this.port);
       this.handler.clear();
+
+      let ownedRam: number = 0;
+      try {
+         for (const s of getOwnedServersData(this.ns)) {
+            ownedRam += s.maxRam;
+         }
+      } catch (error) {
+         this.logger.warn(`DB likely isn't populated yet. Error: ${error}`);
+      }
+
+      this.canController = ownedRam >= 64;
+
 
       /*
          This manages all the main functionality of our engine.
@@ -83,173 +103,57 @@ class Engine {
          live changes, but this is good for now.
       */
 
-      // Map all servers to DB
-      const serverMapper = this.createScriptConfig(
-         "Server Mapper",
-         consts.SERVER_MAPPER_SCRIPT,
-         Priority.REQUIRED,
-         null,
-         true
-      );
-      this.register(serverMapper);
-
-      // Attempt to root all servers
-      const rooter = this.createScriptConfig(
-         "Server Rooter",
-         consts.ROOT_SCRIPT,
-         Priority.STANDARD,
-         null,
-         true // run on home
-      );
-      this.register(rooter);
-
-      // Keep up hacking controllers
-      const controller = this.createScriptConfig(
-         "Controller Manager",
-         consts.CONTROLLER_MANAGER_SCRIPT,
-         Priority.PRIORITY
-      );
-      this.register(controller);
-
-      // Keep an eye on upgrading our hosts
-      const hostManager = this.createScriptConfig(
-         "Host Manager",
-         consts.HOST_MANAGER_SCRIPT,
-         Priority.STANDARD
-      );
-      this.register(hostManager);
-
-      // Commit the best crime to obtain money (and bad karma)
-      const crimeManager = this.createScriptConfig(
-         "Crime Manager",
-         consts.CRIME_MANAGER_SCRIPT,
-         Priority.PRIORITY
-      );
-      this.register(crimeManager);
-
-      // Join factions that don't have any enemies
-      const factionManager = this.createScriptConfig(
-         "Faction Manager",
-         consts.FACTION_MANAGER_SCRIPT,
-         Priority.STANDARD
-      );
-      this.register(factionManager);
-
-      // Manage our gang
-      const gangManager = this.createScriptConfig(
-         "Gang manager",
-         consts.GANG_SCRIPT,
-         Priority.STANDARD,
-         {
-            prioritizeRespect: true
-         }
-      )
-      this.register(gangManager);
-
-      // Upgrade home computer as long as it keeps us above money buffer
-      const homeManager = this.createScriptConfig(
-         "Home Computer Manager",
-         consts.HOME_MANAGER_SCRIPT,
-         Priority.STANDARD
-      );
-      this.register(homeManager);
-
-      // Buy Dark Web programs
-      const torManager = this.createScriptConfig(
-         "Dark Web Manager",
-         consts.TOR_MANAGER_SCRIPT,
-         Priority.STANDARD
-      );
-      this.register(torManager);
-
-      // Ensure we are playing GO
-      // goManager: this.createScriptConfig(ns,
-      //    "Go Manager",
-      //    undefined,
-      //    getRandomInt()
-      // ),
-
-      // Attempt to backdoor do-able servers
-      const backdoorManager = this.createScriptConfig(
-         "Backdoor Manager",
-         consts.BACKDOOR_MANAGER_SCRIPT,
-         Priority.STANDARD
-      );
-      this.register(backdoorManager);
+      for (const sc of consts.CORE_SCRIPTS) {
+         this.register(sc);
+      }
    }
 
    async start() {
       // Begin main loop
       try {
-         let timer: number = 0;
          let startup: boolean = true;
 
          while (true) {
             await this.deployAllScripts(startup);
             startup = false;
 
-            // After a period of time let's try to re-enable our disabled scripts
-            // This will automatically "progress" us by rechecking milestones
-            if (timer >= this.intervalPeriod) {
-               this.reenableDisabledScripts();
-            }
-
             await this.ns.sleep(this.pollingRate)
-            timer += this.pollingRate;
 
             await this.monitorPort();
+
+            this.reenableFailedScripts();
+
+            if (Date.now() - this.startTime > RESET_INTERVAL) {
+               // Once enough time as elapsed, kill ourselves and start 
+               // anew to automatically check progression
+               this.finish();
+               break;
+            }
+            this.logger.info(`
+               Queue size:  ${this.queue.size()}
+               Failed size: ${this.failed.size()}
+               Bench size:  ${this.bench.size}
+               `);
+
          }
       } catch (error) {
          this.logger.error(`ERROR -- Engine died due to: ${error}`);
       }
+
+      this.logger.info(`Engine hit ${RESET_INTERVAL / Time.MINUTE} minutes, restarting!`, 0, Colors.Blue, true);
    }
 
    /* ------------------------------------------------------------------------------------------------------------------- */
    /* --------------------- FUNCTION DEFINITIONS ------------------------------------------------------------------------ */
    /* ------------------------------------------------------------------------------------------------------------------- */
 
-   /**
-    * Creates a script configuration object with the specified parameters.
-    * @param {string} name - The display name for the script.
-    * @param {string} script - The script filename to execute.
-    * @param {string[]} [args] - Optional array of arguments to pass to the script.
-    * @param {boolean} [homeLocked=false] - Whether the script should only run on the home server.
-    * @param {boolean} [enabled=true] - Whether the script is enabled for execution.
-    * @returns {ScriptConfig} - A configured script object ready for deployment.
-    */
-   createScriptConfig(
-      name: string,
-      script: string,
-      priority: Priority,
-      args?: any,
-      homeLocked: boolean = false,
-      enabled: boolean = true,
-      isRunning: boolean = false
-   ): ScriptConfig {
-      // We use this format to enforce we pass a port, which is required
-      // for a child script to write back that it's finished. Without that,
-      // our engine will never know when a child script is done.
-      const scriptArgs = {
-         port: this.port,
-         args: args
-      }
-      const jsonArgs = JSON.stringify(scriptArgs);
-      this.logger.debug(`Created ScriptConfig for ${script} that is ${jsonArgs}`);
-      const obj: ScriptConfig = {
-         name,
-         script,
-         priority,
-         args: [jsonArgs],
-         port: this.port,
-         enabled,
-         homeLocked,
-         isRunning
-      };
-      return obj;
-   }
+
 
    register(sc: ScriptConfig) {
-      this.bench.set(getScriptName(sc.script), sc);
+      // add our port to the config
+      updateScriptConfigArg(sc, `port`, this.port);
+      this.logger.debug(`Registering script: ${JSON.stringify(sc)}`);
+      this.bench.set(sc.script, sc);
       this.queue.enqueue(sc);
    }
 
@@ -263,21 +167,35 @@ class Engine {
       // If this is our first time starting the script, run all the required scripts and pause for a second
       // We do this because of things like server-mapper needing to build our database first
       if (startup) {
-         this.logger.info(`Starting up, focusing on required items`,1);
+         this.logger.info(`Starting up, focusing on required items`, 1);
+
          while (!this.queue.isEmpty() && this.queue.peek() && this.queue.peek()?.priority === Priority.REQUIRED) {
             const script = this.queue.dequeue();
             if (script) { this.deployScript(script); }
+            await this.ns.sleep(200);
          }
 
-         await this.ns.sleep(5000);
-      } 
+         await this.ns.sleep(STARTUP_GRACE_PERIOD);
+      }
 
       while (!this.queue.isEmpty()) {
          const script = this.queue.dequeue();
-         if (script) { this.deployScript(script); }
+
+         if (script) {
+            // if we're launching the controller manager after obtaining enough RAM to do so,
+            // let's make sure all our dangling parasites are killed off first
+            if (script.script == consts.CONTROLLER_MANAGER_SCRIPT) { this.killAllParasites(); }
+            this.deployScript(script);
+         }
+
+         await this.ns.sleep(DEPLOY_RATE);
       }
 
-      this.logger.debug(`Finished deploying queue`,1);
+      this.logger.debug(`Finished deploying queue`, 1);
+   }
+
+   deleteServerDB() {
+      this.ns.rm(consts.DB_FILE, `home`);
    }
 
    /**
@@ -286,43 +204,20 @@ class Engine {
     * @param {ScriptConfig} config - The script configuration to deploy.
     */
    deployScript(config: ScriptConfig) {
-      const result = this.runScript(config);
-      this.logger.info(`${config.name}: [${result.code}] ${exitCodeMessages[result.code]} on ${result.host}`);
+      const result = orchestrateScript(this.ns, config.script, 1, config.args, config.homeLocked);
+      this.logger.debug(`${config.script}: [${result.code}] ${exitCodeMessages[result.code]} ${result.host ? `on ${result.host}` : ``}`);
 
-      // If there was an execution or script not found failure, let's skip this one
-      if (result.code == 1 || result.code == 3) {
-         this.logger.debug(`${config} returned 1 or 3, disabling..`, 1);
-         config.enabled = false;
-
-         // If there wasn't enough space, add this to the queue
-      } else if (result.code == 2) {
-         this.queue.enqueue(config);
-      }
-      this.logger.debug(`Deployed ${config.name}`, 1);
-   }
-
-   /**
-    * Executes a script with verification and error handling.
-    * Verifies the script exists before orchestrating its execution.
-    * @param {ScriptConfig} config - The script configuration to run.
-    * @returns {number} - The exit code from script orchestration (3 if verification fails).
-    */
-   runScript(config: ScriptConfig) {
-      this.logger.debug(`Starting ${config.name} (${config.script})..`);
-
-      // Everything hinges on our ServerMapper, so we're going to baby this onto `home`
-      if (config.script == consts.SERVER_MAPPER_SCRIPT) {
-         const args = config.args ?? [];
-         const result = this.ns.exec(consts.SERVER_MAPPER_SCRIPT, `home`, 1, ...args);
-
-         return { code: result > 0 ? 0 : 3, pid: result, host: `home` };
+      // If there was an execution or script not found failure, let's skip this one and mark it as failed
+      if (result.code > 0) {
+         this.logger.warn(`${config.script} returned [${result.code}] ${exitCodeMessages[result.code]}..`, 1);
+         this.failed.enqueue(config);
       } else {
-         return orchestrateScript(this.ns, config.script, 1, config.args, config.homeLocked);
+         this.logger.info(`Deployed ${config.script}`);
       }
    }
 
    async monitorPort() {
-      this.logger.debug(`Monitoring port ${this.port}..`);
+      this.logger.info(`Monitoring port ${this.port}..`);
       if (this.queue.size() == this.bench.size) {
          this.logger.debug(`Nothing to monitor for, skipping port check`, 1);
          return;
@@ -336,31 +231,71 @@ class Engine {
 
       while (this.handler.peek() != "NULL PORT DATA") {
          const result: Worker = JSON.parse(this.handler.read()) as Worker;
-         this.logger.debug(`Port ${this.port} read: ${result.script} [${result.pid}]`);
+         this.logger.debug(`Port ${this.port} read: ${result.script} [${result.pid}] with return ${result.value}`);
 
          const duration: string = result.duration ? `in ${result.duration / Time.SECOND} seconds` : "";
          const host: string = result.host ? `on ${result.host}` : "";
-         this.logger.info(`${result.script} finished ${duration} with PID ${result.pid} ${host}`, 1);
-         debugger;
-         let benchedConfig = this.bench.get(getScriptName(result.script));
-         if (benchedConfig) {
-            this.queue.enqueue(benchedConfig);
+         this.logger.info(`${result.script} finished ${duration} with PID ${result.pid} ${host} and exit code [${result.value}]`, 1);
+         const returnedConfig = this.bench.get(result.script);
+         if (!returnedConfig) {
+            this.logger.warn(`No match for this returned config, skipping..\r\n` +
+               `Return: ${result}`
+            );
+            continue;
          }
+
+
+         // Figure out what we should do with the result
+         switch (result.value) {
+            case ManagerExitCode.SUCCESS:
+            case ManagerExitCode.FAILURE:
+               let benchedConfig = this.bench.get(result.script);
+               if (benchedConfig) {
+                  this.logger.debug(`Re-queueing ${benchedConfig.script}`);
+                  this.queue.enqueue(benchedConfig);
+               }
+               break;
+            case ManagerExitCode.UNOBTAINABLE:
+               this.bench.delete(returnedConfig.script);
+               break;
+         }
+
 
          await this.ns.sleep(10);
       }
       this.logger.debug(`Done checking port`, 1);
    }
 
-   reenableDisabledScripts() {
-      for (const [script, config] of this.bench) {
-         config.enabled = true;
+   reenableFailedScripts() {
+      this.logger.debug(`Re-queueing all missing scripts..`);
+      while (!this.failed.isEmpty()) {
+         if (this.failed.peek()) {
+            this.logger.debug(`Re-queueing ${(this.failed.peek() as ScriptConfig).script}`);
+            this.queue.enqueue(this.failed.dequeue() as ScriptConfig);
+         }
+      }
+   }
+
+   killAllParasites() {
+      for (const s of getServersWithRoot(this.ns)) {
+         this.ns.scriptKill(consts.STARTER_HACK_SCRIPT, s);
+      }
+   }
+
+   finish() {
+      this.logger.info(`Destroying all scripts before engine stops..`);
+      for (const s of readDB(this.ns).values()) {
+         this.ns.killall(s.hostname, true);
       }
    }
 }
 
 export async function main(ns: NS) {
    ns.disableLog("ALL");
-   const engine: Engine = new Engine(ns);
-   await engine.start();
+
+   while (true) {
+      const engine: Engine = new Engine(ns);
+      await engine.start();
+   }
+
 }

@@ -6,10 +6,10 @@ import * as consts from "@/lib/constants";
 import { DarkWebProgram } from "@/lib/types";
 
 class TorManager extends BaseManager {
-   start() {
-      if (!hasSingularity(this.ns)) { this.finish(); }
+   async start() {
+      if (!hasSingularity(this.ns)) { this.skipMe(); }
       this.buyPrograms();
-      this.finish();
+      this.success();
    }
 
    /**
@@ -71,5 +71,5 @@ class TorManager extends BaseManager {
 export async function main(ns: NS) {
    ns.disableLog("ALL");
    const tm = new TorManager(ns, ns.args);
-   tm.start();
+   await tm.start();
 }

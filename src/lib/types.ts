@@ -106,7 +106,9 @@ export enum StockPosition {
 
 export interface ServerData extends Server {
   freeRam: number,
-  ramBuffer: number
+  ramBuffer: number,
+  minRamForHack?: number,
+  minRamForPrep?: number
 }
 
 // Gets time interval via milliseconds
@@ -123,6 +125,18 @@ export const exitCodeMessages: Record<number, string> = {
   3: "Script not found"
 }
 
+export enum ManagerExitCode {
+  SUCCESS = 0,
+  FAILURE = 1,
+  UNOBTAINABLE = 2
+}
+
+export const ManagerExitCodes: Record<number, string> = {
+  0: "Success",
+  1: "Execution failure",
+  2: "Not obtainable at this point in the game"
+}
+
 export interface RunnerConfig {
   fn: () => number;
   enabled: boolean;
@@ -137,17 +151,42 @@ export enum Priority {
   STANDARD = 2
 }
 
+export interface ScriptConfigOptions {
+   args?: Record<string, ScriptArg>;
+   port?: number;
+   homeLocked?: boolean;
+   isRunning?: boolean;
+}
+
 export interface ScriptConfig {
-  name: string,
   script: string,
-  enabled: boolean,
   priority: Priority,
   args?: ScriptArg[],
   port?: number,
   homeLocked?: boolean,
-  isRunning?: boolean
   pid?: number,
   host?: string
+}
+
+export function updateScriptConfigArg(config: ScriptConfig, key: string, newValue: ScriptArg) {
+  if (!config.args) return;
+
+  // Find the index of the JSON string that contains this key
+  const index = config.args.findIndex(arg => {
+    try {
+      return key in JSON.parse(arg as string);
+    } catch { return false; }
+  });
+
+  const newEntry = JSON.stringify({ [key]: newValue });
+
+  if (index !== -1) {
+    // Modify existing
+    config.args[index] = newEntry;
+  } else {
+    // Add new if it didn't exist
+    config.args.push(newEntry);
+  }
 }
 
 export class PriorityQueue {
@@ -157,7 +196,7 @@ export class PriorityQueue {
 
   enqueue(config: ScriptConfig): void {
     // Check if script already exists in any queue
-    if (this.exists(config.name)) {
+    if (this.exists(config.script)) {
       return; // Don't add duplicate
     }
 
@@ -186,10 +225,10 @@ export class PriorityQueue {
     return undefined;
   }
 
-  private exists(scriptName: string): boolean {
-    return this.required.some(c => c.name === scriptName) ||
-      this.priority.some(c => c.name === scriptName) ||
-      this.standard.some(c => c.name === scriptName);
+  exists(scriptName: string): boolean {
+    return this.required.some(c => c.script === scriptName) ||
+      this.priority.some(c => c.script === scriptName) ||
+      this.standard.some(c => c.script === scriptName);
   }
 
   isEmpty(): boolean {

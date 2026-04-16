@@ -1,9 +1,10 @@
 import * as C from "@/lib/constants";
-import { GangMemberAscension, GangMemberInfo, NetscriptPort, ScriptArg } from "NetscriptDefinitions";
+import { GangMemberAscension, GangMemberInfo, ScriptArg } from "NetscriptDefinitions";
 import { formatDollar } from "@/lib/formatter";
-import { GangTask } from "@/lib/types";
+import { GangTask, LogLevel } from "@/lib/types";
 import { roundTo } from "@/lib/calc";
 import { BaseManager } from "@/lib/BaseManager";
+import { Colors } from "@/lib/logger";
 
 export class GangEngine extends BaseManager {
 
@@ -19,31 +20,56 @@ export class GangEngine extends BaseManager {
 
   constructor(ns: NS, scriptArgs: ScriptArg[]) {
     super(ns, scriptArgs);
-
-    this.prioritizeRespect = this.args[`prioritizeRespect`] as boolean;
+    this.logger.setLogLevel(LogLevel.DEBUG);
+    //this.ns.ui.openTail();
     this.inGang = ns.gang.inGang();
-    this.isHackingGang = ns.gang.getGangInformation().isHacking;
 
-    this.hackTasks = !this.inGang ? [] : ns.gang.getTaskNames()
-      .filter(t => ns.gang.getTaskStats(t).isHacking)
-      .sort((a, b) => ns.gang.getTaskStats(a).difficulty - ns.gang.getTaskStats(b).difficulty);
-    this.combatTasks = !this.inGang ? [] : ns.gang.getTaskNames()
-      .filter(t => ns.gang.getTaskStats(t).isCombat)
-      .sort((a, b) => ns.gang.getTaskStats(a).difficulty - ns.gang.getTaskStats(b).difficulty);
-    this.gangEquipmentByType = !this.inGang ? new Map<string, string[]> : this.getEquipmentByType();
-    this.gangMembers = !this.inGang ? [] : this.ns.gang.getMemberNames() ?? [];
-    this.gangTasks = [];
+    if (this.inGang) {
+      this.prioritizeRespect = this.args[`prioritizeRespect`] as boolean;
+      this.isHackingGang = ns.gang.getGangInformation().isHacking;
+
+      this.hackTasks = ns.gang.getTaskNames()
+        .filter(t => ns.gang.getTaskStats(t).isHacking)
+        .sort((a, b) => ns.gang.getTaskStats(a).difficulty - ns.gang.getTaskStats(b).difficulty);
+      this.combatTasks = ns.gang.getTaskNames()
+        .filter(t => ns.gang.getTaskStats(t).isCombat)
+        .sort((a, b) => ns.gang.getTaskStats(a).difficulty - ns.gang.getTaskStats(b).difficulty);
+      this.gangEquipmentByType = !this.inGang ? new Map<string, string[]> : this.getEquipmentByType();
+      this.gangMembers = this.ns.gang.getMemberNames() ?? [];
+      this.gangTasks = [];
+    } else {
+      this.prioritizeRespect = false;
+      this.isHackingGang = false;
+      this.hackTasks =[];
+      this.gangEquipmentByType = new Map();
+      this.combatTasks = [];
+      this.gangMembers = [];
+      this.gangTasks = [];
+    }
+
+    // this.prioritizeRespect = this.args[`prioritizeRespect`] as boolean;
+    // this.isHackingGang = !this.inGang ? false : ns.gang.getGangInformation().isHacking;
+
+    // this.hackTasks = !this.inGang ? [] : ns.gang.getTaskNames()
+    //   .filter(t => ns.gang.getTaskStats(t).isHacking)
+    //   .sort((a, b) => ns.gang.getTaskStats(a).difficulty - ns.gang.getTaskStats(b).difficulty);
+    // this.combatTasks = !this.inGang ? [] : ns.gang.getTaskNames()
+    //   .filter(t => ns.gang.getTaskStats(t).isCombat)
+    //   .sort((a, b) => ns.gang.getTaskStats(a).difficulty - ns.gang.getTaskStats(b).difficulty);
+    // this.gangEquipmentByType = !this.inGang ? new Map<string, string[]> : this.getEquipmentByType();
+    // this.gangMembers = !this.inGang ? [] : this.ns.gang.getMemberNames() ?? [];
+    // this.gangTasks = [];
   }
 
   async start() {
     if (!this.inGang) {
       const karma = this.ns.getPlayer().karma;
       if (karma <= C.GANG_KARMA_REQ) {
-        this.logger.info(`You have ${this.ns.formatNumber(karma, 1)} and can join a gang! Otherwise, exiting gang script.`, 0, true);
+        this.logger.info(`You have ${this.ns.formatNumber(karma, 1)} and can join a gang! Otherwise, exiting gang script.`, 0, undefined, true);
       } else {
-        this.logger.info(`You have ${this.ns.formatNumber(karma, 1)} and need ${C.GANG_KARMA_REQ} karma before you can join a gang. Exiting gang script..`, 0, true);
+        this.logger.info(`You have ${this.ns.formatNumber(karma, 1)} and need ${C.GANG_KARMA_REQ} karma before you can join a gang. Exiting gang script..`, 0, undefined, true);
       }
-      return;
+      this.skipMe();
     }
 
     this.logger.debug(`GangEngine started with focus on ${this.prioritizeRespect ? 'respect' : 'money'}`);
@@ -51,6 +77,7 @@ export class GangEngine extends BaseManager {
     this.setGangType();
 
     while (true) {
+      if (!this.inGang) break;
       this.hireGangMember();
 
       this.checkMemberAscension();
@@ -92,6 +119,10 @@ export class GangEngine extends BaseManager {
 
     for (const eq of this.ns.gang.getEquipmentNames()) {
       const type = this.ns.gang.getEquipmentType(eq);
+      const stats = this.ns.gang.getEquipmentStats(eq);
+
+      if (stats.hack && !this.isHackingGang) { continue; }
+
       if (temp.has(type)) {
         temp.get(type)!.push(eq);
       } else {
@@ -120,7 +151,7 @@ export class GangEngine extends BaseManager {
     this.logger.debug(`Checking if we can hire a gang member..`);
     if (this.ns.gang.canRecruitMember()) {
       const member = `johnny-${String(this.gangMembers.length).padStart(3, '0')}`;
-      this.logger.info(`Recruiting gang member: ${member}`, 0, true);
+      this.logger.info(`Recruiting gang member: ${member}`, 0, undefined, true);
       const success = this.ns.gang.recruitMember(member);
       if (success) {
         this.gangMembers.push(member);
@@ -165,7 +196,7 @@ export class GangEngine extends BaseManager {
 
         this.logger.debug(`${member} ascension hack multiplier would be ${asc.hack}`);
         if (asc.hack > C.GANG_ASCENSION_MULT_THRESHOLD) {
-          this.logger.info(`Ascending ${member} w/ hack multipler ${asc.hack}, losing ${asc.respect} respect`, 0, true);
+          this.logger.info(`Ascending ${member} w/ hack multipler ${asc.hack}, losing ${asc.respect} respect`, 0, undefined, true);
           this.ns.gang.ascendMember(member);
         }
 
@@ -176,7 +207,9 @@ export class GangEngine extends BaseManager {
           || asc.def > C.GANG_ASCENSION_MULT_THRESHOLD
           || asc.dex > C.GANG_ASCENSION_MULT_THRESHOLD
           || asc.str > C.GANG_ASCENSION_MULT_THRESHOLD) {
-          this.logger.info(`Ascending ${member} with multipliers: [strength: ${asc.str}], [charisma: ${asc.cha}], [defense: ${asc.def}], [dexterity: ${asc.dex}], [strength: ${asc.str}] losing ${asc.respect} respect.`, 0, true);
+          this.logger.info(`Ascending ${member} with multipliers: [strength: ${asc.str}], `
+            + `[charisma: ${asc.cha}], [defense: ${asc.def}], [dexterity: ${asc.dex}], `
+            + `[strength: ${asc.str}] losing ${asc.respect} respect.`, 0, undefined, true);
           this.ns.gang.ascendMember(member);
         }
       }
@@ -207,7 +240,7 @@ export class GangEngine extends BaseManager {
 
       if (penalty > C.GANG_WANTED_PENALTY_THRESHOLD || wantedLevel < C.GANG_WANTED_LEVEL_THRESHOLD) {
         // penalty isn't too bad, lets get to work
-        if ( this.isHackingGang ? memberStats.hack < 10 : memberStats.str < 10) {
+        if (this.isHackingGang ? memberStats.hack < 10 : memberStats.str < 10) {
           this.ns.gang.setMemberTask(member, this.getBestLevellingTask(member));
         }
         else if (this.prioritizeRespect) { this.ns.gang.setMemberTask(member, this.getBestRespectTask(member)); }
@@ -227,10 +260,10 @@ export class GangEngine extends BaseManager {
     // iterate through all relative tasks
     for (const task of this.gangTasks) {
       this.ns.gang.setMemberTask(member, task);
-      const money   = this.ns.gang.getMemberInformation(member).moneyGain;
+      const money = this.ns.gang.getMemberInformation(member).moneyGain;
       const respect = this.ns.gang.getMemberInformation(member).respectGain;
-      const wanted  = this.ns.gang.getMemberInformation(member).wantedLevelGain;
-      const exp     = this.ns.gang.getMemberInformation(member).expGain;
+      const wanted = this.ns.gang.getMemberInformation(member).wantedLevelGain;
+      const exp = this.ns.gang.getMemberInformation(member).expGain;
 
       const tempTask: GangTask = {
         name: task,
@@ -247,6 +280,8 @@ export class GangEngine extends BaseManager {
       //this.logger.debug(`${task} rewards $${money} and ${respect} respect with ${wanted} notoriety`,1);
       gangTasks.push(tempTask);
     }
+
+    this.ns.gang.setMemberTask(member, currentTask);
 
     return gangTasks;
   }
@@ -300,9 +335,9 @@ export class GangEngine extends BaseManager {
   getBestLevellingTask(member: string): string {
     this.logger.debug(`Finding best levelling task for ${member}..`);
     const taskStats = this.getMemberTaskStats(member);
-    const bestTask: GangTask = this.ns.gang.getGangInformation().isHacking ? 
-      taskStats.reduce((max, task) => task.hackExp  > max.hackExp ? task : max)
-      : taskStats.reduce((max, task) => task.strExp  > max.strExp ? task : max) ;
+    const bestTask: GangTask = this.ns.gang.getGangInformation().isHacking ?
+      taskStats.reduce((max, task) => task.hackExp > max.hackExp ? task : max)
+      : taskStats.reduce((max, task) => task.strExp > max.strExp ? task : max);
     this.logger.debug(`Best levelling task for ${member} is ${bestTask.name} earning ${this.isHackingGang ? bestTask.hackExp : bestTask.strExp} exp`);
     return bestTask.name;
   }
@@ -362,7 +397,7 @@ export class GangEngine extends BaseManager {
 
             // check if we can afford it
             if (playerMoney > cost && (playerMoney - cost) > C.MONEY_BUFFER) {
-              this.logger.debug(`Purchasing ${e} for ${formatDollar(this.ns, cost)} for ${member}`);
+              this.logger.info(`Purchasing ${e} for ${formatDollar(this.ns, cost)} for ${member}`,0,Colors.BrightYellow, true);
               this.ns.gang.purchaseEquipment(member, e);
             }
           }
@@ -401,7 +436,7 @@ export class GangEngine extends BaseManager {
         const cost = this.ns.gang.getEquipmentCost(aug);
 
         if (playerMoney > cost && (playerMoney - cost) > C.MONEY_BUFFER) {
-          this.logger.debug(`Purchasing AUGMENT ${aug} for ${formatDollar(this.ns, cost)} for ${member}`);
+          this.logger.info(`Purchasing AUGMENT ${aug} for ${formatDollar(this.ns, cost)} for ${member}`,0,Colors.BrightYellow, true);
           this.ns.gang.purchaseEquipment(member, aug);
         }
       }

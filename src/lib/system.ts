@@ -1,7 +1,10 @@
 import { Logger } from "./logger";
-import { getOwnedServers, getServerData, readDB } from "@/lib/db";
+import * as consts from "@/lib/constants";
+import { getOwnedServers, getServerData, getServerDatasWithRoot, readDB } from "@/lib/db";
 import { getServersWithRoot } from "@/lib/db";
 import { ScriptArg } from "NetscriptDefinitions";
+import { read } from "./cacheManager";
+import { Plan } from "./types";
 
 /**
  * Kills any other script running with the same name, regardless of arguments.
@@ -82,7 +85,13 @@ export function getScriptName(path: string): string {
  * @param {string[]} [args=[]] - Arguments to pass to the script
  * @returns {number} Exit code (0 = success, 1 = execution failure, 2 = not enough space, 3 = script not found)
  */
-export function orchestrateScript(ns: NS, script: string, threads: number = 1, args: ScriptArg[] = [], homeLocked: boolean = false): { code: number, pid: number, host: string } {
+export function orchestrateScript(
+  ns: NS,
+  script: string,
+  threads: number = 1,
+  args: ScriptArg[] = [],
+  homeLocked: boolean = false,
+  dependencies: string[] = []): { code: number, pid: number, host: string } {
   const logger = new Logger(ns);
 
   // Validation checking on the script and parameters
@@ -102,7 +111,7 @@ export function orchestrateScript(ns: NS, script: string, threads: number = 1, a
   }
 
   // Determine RAM required for script
-  const reqRam: number = (ns.getScriptRam(script) * threads) * 2;
+  const reqRam: number = (ns.getScriptRam(script) * threads);
 
   // Set the targetServer to "home" if we set that flag, otherwise find the server with the most amount of ram
   let targetServer: string = "";
@@ -117,11 +126,11 @@ export function orchestrateScript(ns: NS, script: string, threads: number = 1, a
   } else {
 
     // Get all owned servers and their available space
-    let ownedServers: string[] = [...new Set([...getServersWithRoot(ns), ...getOwnedServers(ns)])];
+    let ownedServers: string[] = [...new Set([...getServersWithRoot(ns)])];
 
     const viableServers = ownedServers
-      .filter(s => ns.getServerMaxRam(s) - ns.getServerUsedRam(s) > reqRam)
-      .sort((a, b) => ns.getServerMaxRam(a) - ns.getServerUsedRam(b));
+      .filter(s => getServerFreeSpace(ns, s) > reqRam)
+      .sort((a, b) => getServerFreeSpace(ns, b) - getServerFreeSpace(ns, a));
 
     if (!viableServers || viableServers.length <= 0) {
       logger.error(`No valid server space was found for ${script}, which utilizes ${reqRam} ram`);
@@ -133,17 +142,28 @@ export function orchestrateScript(ns: NS, script: string, threads: number = 1, a
   }
 
   // Attempt to scp and exec the script on the first available space
-  const targetServerRam = ns.getServerMaxRam(targetServer) - ns.getServerUsedRam(targetServer);
-  logger.info(`Attempting to run ${script} [${reqRam} GB] on ${targetServer} [${targetServerRam} GB free] with args [${args}]..`);
+  const targetServerRam = homeLocked ? ns.getServerMaxRam(`home`) - ns.getServerUsedRam(`home`) : getServerFreeSpace(ns, targetServer);
+  logger.debug(`Attempting to run ${script} [${reqRam} GB] on ${targetServer} [${targetServerRam} GB free] with args [${args}]..`);
   if (!ns.fileExists(script, targetServer)) {
     ns.scp(script, targetServer);
   }
 
+  if (dependencies.length > 0) {
+    for (const d of dependencies) {
+      const scpResult = ns.scp(d, targetServer, `home`);
+      if (!scpResult) {
+        logger.error(`Could not find dependency [${d}] for [${script}]! Aborting..`);
+        return { code: 3, pid: -1, host: "" };
+      }
+    }
+  }
 
   const pid = ns.exec(script, targetServer, threads, ...args)
   if (pid == 0) {
     logger.error(`Failed to start ${script} [${reqRam} GB] with ${threads} threads on ${targetServer} [${targetServerRam} GB free]`);
     return { code: 1, pid: -1, host: targetServer };
+  } else {
+    logger.debug(`Successfully started ${script} [${reqRam} GB] with ${threads} threads on ${targetServer} [${targetServerRam} GB free]`);
   }
 
   return { code: 0, pid: pid, host: targetServer };
@@ -171,5 +191,151 @@ export function killOrchestratedScripts(ns: NS, scripts: { pid: number, host: st
     }
   }
   return true;
+}
+
+export function canWeDeploy(ns: NS,
+  script: string,
+  threads: number = 1,
+  homeLocked: boolean = false): boolean {
+  const logger = new Logger(ns);
+  const servers: Map<string, number> = simulatedServers(ns);
+
+  // Validation checking on the script and parameters
+  if (script == "") {
+    logger.error(`No proper script name was given!`);
+    return false;
+  }
+
+  if (threads < 1) {
+    logger.error(`Was given ${threads} threads!`);
+    return false;
+  }
+
+  // Determine RAM required for script
+  const reqRam: number = (ns.getScriptRam(script) * threads);
+
+  // Set the targetServer to "home" if we set that flag, otherwise find the server with the most amount of ram
+  let targetServer: string = "";
+  if (homeLocked) {
+    const homeRam = servers.get(`home`) as number;
+    if (homeRam > reqRam) {
+      targetServer = "home";
+    } else {
+      logger.warn(`Home is prioritized but there's not enough ram to run ${script} with ${threads} threads! Required: ${reqRam}, Available: ${homeRam}`);
+      return false;
+    }
+  } else {
+
+    const viableServers: string[] = Array.from(servers.entries())
+      .filter(([host, free]) => free > reqRam)
+      .map(([host, free]) => host);
+
+    if (!viableServers || viableServers.length <= 0) {
+      logger.warn(`No valid server space was found for ${script}, which utilizes ${reqRam} ram`);
+      return false;
+    }
+
+    // Prioritize "home" server if it's viable
+    targetServer = viableServers.includes("home") ? "home" : viableServers[0];
+  }
+
+  logger.debug(`Returning true! You can deploy to ${targetServer} which has ${getServerFreeSpace(ns, targetServer)} GB free`);
+
+  return true;
+
+}
+
+export function canWeDeployPlan(ns: NS, plan: Plan[]): boolean {
+  const logger = new Logger(ns);
+  const servers: Map<string, number> = simulatedServers(ns);
+  logger.debug(`Simulating deploying ${JSON.stringify(plan)}`);
+  debugger;
+
+  for (const p of plan) {
+    // Validation checking on the script and parameters
+    if (p.script == "") {
+      logger.warn(`No proper script name was given!`);
+      return false;
+    }
+
+    if (p.threads < 1) {
+      logger.warn(`Was given ${p.threads} threads!`);
+      return false;
+    }
+
+    // Determine RAM required for script
+    const reqRam: number = (ns.getScriptRam(p.script) * p.threads);
+    logger.debug(`${p.script} requires ${reqRam} GB RAM`,1);
+
+    const viableServers: string[] = Array.from(servers.entries())
+      .filter(([host, free]) => free > reqRam)
+      .map(([host, free]) => host);
+
+    logger.debug(`Found ${viableServers.length} viable servers`);
+
+    if (!viableServers || viableServers.length <= 0) {
+      logger.warn(`No valid server space was found for ${p.script}, which utilizes ${reqRam} ram`);
+      return false;
+    }
+
+    // Prioritize "home" server if it's viable
+    const targetServer = viableServers.includes("home") ? "home" : viableServers[0];
+    const originalRam = servers.get(targetServer) as number;
+    servers.set(targetServer, originalRam - reqRam);
+    logger.debug(`${p.script} succeeded. Subtracting ${reqRam} from chosen host ${targetServer}`);
+  }
+
+  return true;
+}
+
+/**
+ * Get free space of a server. If it's home, subtract our ram buffer from it.
+ * 
+ * @param ns 
+ * @param target 
+ * @returns 
+ */
+export function getServerFreeSpace(ns: NS, target: string): number {
+  const freeSpace: number = Math.floor(ns.getServerMaxRam(target) - ns.getServerUsedRam(target));
+  return target == `home` ? Math.max(freeSpace - consts.HOME_RAM_BUFFER, 0) : freeSpace;
+}
+
+export function simulatedServers(ns: NS): Map<string, number> {
+  const simServers = new Map<string, number>();
+  getRootedServersBySpace(ns).forEach(s => {
+    if (s.free > 0) {
+      simServers.set(s.host, s.free);
+    }
+  });
+  return simServers;
+  //return new Map(getRootedServersBySpace(ns).map(s => [s.host, s.free]));
+}
+
+export function getRootedServersBySpace(ns: NS): { host: string, free: number }[] {
+  const servers = Array.from(getServerDatasWithRoot(ns).values())
+    .map((s) => ({
+      host: s.hostname,
+      free: getServerFreeSpace(ns, s.hostname)
+    }))
+    .sort((a, b) => b.free - a.free);
+  return servers;
+}
+
+export function getServersBySpace(ns: NS): { host: string, free: number }[] {
+  const servers = Array.from(readDB(ns).values())
+    .map((s) => ({
+      host: s.hostname,
+      free: getServerFreeSpace(ns, s.hostname)
+    }))
+    .sort((a, b) => b.free - a.free);
+  return servers;
+}
+
+export function getFreeSpace(ns: NS): number {
+  let freeSpace: number = 0;
+  for (const s of readDB(ns).values()) {
+    freeSpace += ns.getServerMaxRam(s.hostname) - ns.getServerUsedRam(s.hostname);
+  }
+  return freeSpace;
 }
 
